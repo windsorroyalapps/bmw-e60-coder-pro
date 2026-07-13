@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">BMW E60 Coder Pro</string>
+    <string name="title_activity_main">BMW E60 Coder Pro</string>
+    <string name="package_name">com.bmwe60.coderpro</string>
+    <string name="custom_url_scheme">com.bmwe60.coderpro</string>
+</resources>

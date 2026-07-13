@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Allow any USB accessory (for OBD2 adapters that present as accessories) -->
+    <usb-accessory model="KDCAN" manufacturer="BMW" version="1.0" />
+    <usb-accessory model="OBDLink" manufacturer="OBD Solutions" />
+    <usb-accessory model="ELM327" manufacturer="ELM Electronics" />
+</resources>

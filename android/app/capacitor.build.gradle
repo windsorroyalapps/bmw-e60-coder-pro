@@ -1,0 +1,6 @@
+// This file is auto-generated. Do not edit.
+apply from: '../capacitor-cordova-android-plugins/cordova.variables.gradle'
+
+dependencies {
+
+}
