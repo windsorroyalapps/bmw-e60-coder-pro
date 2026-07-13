@@ -1,0 +1,132 @@
+/* BMW E60 Coder Pro - Automotive Theme */
+
+/* Android Auto Optimized Styles */
+* {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+}
+
+body {
+  background: #0a0a0a;
+  overscroll-behavior: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Custom scrollbar for automotive dark theme */
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #333;
+  border-radius: 2px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #555;
+}
+
+/* Range input styling */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 6px;
+  background: #1a1a2e;
+  border-radius: 3px;
+  outline: none;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  background: #3b82f6;
+  border-radius: 50%;
+  cursor: pointer;
+  border: 2px solid #0a0a0a;
+}
+
+input[type="range"]::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  background: #3b82f6;
+  border-radius: 50%;
+  cursor: pointer;
+  border: 2px solid #0a0a0a;
+}
+
+/* Select dropdown styling */
+select {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+/* Touch targets for Android Auto - minimum 48px */
+button, input, select, textarea {
+  min-height: 36px;
+}
+
+/* Animation for gauge updates */
+@keyframes pulse-glow {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+.gauge-warning {
+  animation: pulse-glow 0.5s ease-in-out infinite;
+}
+
+/* Fullscreen for Android Auto headunits */
+@supports (display: env(safe-area-inset-bottom)) {
+  .safe-area-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
+
+/* Prevent text selection on gauges */
+canvas {
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+}
+
+/* Card hover effects */
+.card-hover {
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.card-hover:active {
+  transform: scale(0.98);
+}
+
+/* Status indicator animation */
+@keyframes status-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4); }
+  50% { box-shadow: 0 0 0 4px rgba(34, 197, 94, 0); }
+}
+
+.status-connected {
+  animation: status-pulse 2s infinite;
+}
+
+/* Table row hover */
+tr:hover td {
+  background-color: rgba(255, 255, 255, 0.02);
+}
+
+/* Button press feedback */
+button:active {
+  transform: scale(0.97);
+}
+
+/* Navigation bar safe area for headunits */
+nav {
+  padding-bottom: max(4px, env(safe-area-inset-bottom, 4px));
+}
