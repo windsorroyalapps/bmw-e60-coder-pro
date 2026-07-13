@@ -2,9 +2,6 @@
 
 Complete BMW E60 tuning, diagnostics, and Xbox controller drive platform for Android Automotive OS headunits.
 
-![Version](https://img.shields.io/badge/version-3.0--AAOS-blue)
-![Platform](https://img.shields.io/badge/platform-Android%20Automotive-green)
-
 ## Features
 
 - **7-Screen Interface**: Home, Gauges, AI Tuning, AI Analysis, DME Flash, Controller Drive, Setup
@@ -15,35 +12,54 @@ Complete BMW E60 tuning, diagnostics, and Xbox controller drive platform for And
 - **VO Editor**: Enable AFS (2VB) and 30+ factory options
 - **AI Analysis**: Real-time knock, AFR, boost, IAT monitoring with auto-tune
 - **DME Flash**: Quick/Full/Live flash with 7-step safety checks
-- **Data Logging**: Session-based recording with export
 
-## Controller Drive
+## Screens
 
-| Input | Function |
-|-------|----------|
-| Left Stick | Steering (up to 540deg via AFS) |
-| RT | Throttle |
-| LT | Brake |
-| Start | Enable drive |
-| Back | Disable drive |
-| Xbox Button | Emergency stop |
-| X | Toggle headlights |
-| Y | Horn |
-| LB/RB | Left/Right blinkers |
-| D-Pad Up/Down | Sport/Eco mode |
+| Screen | Description |
+|--------|-------------|
+| **Home** | Vehicle profile, OBD2 status, ECU grid, live data cards |
+| **Gauges** | Canvas-rendered circular gauges at 60fps, 3 switchable layouts |
+| **AI Tuning** | Map selection, injector calculator, timing/boost/throttle tables |
+| **AI Analysis** | Real-time diagnostics with severity classification |
+| **Controller Drive** | Xbox gamepad vehicle control + VO editor for AFS |
+| **Data Logs** | Session recording, knock detection, data browser |
+| **Setup** | Engine/transmission selection, modification tracking |
 
 ## Tech Stack
 
-React 18 + TypeScript + Vite + Tailwind CSS + shadcn/ui + Zustand + Canvas gauges
+- React 18 + TypeScript + Vite
+- Tailwind CSS + shadcn/ui
+- Zustand (state management)
+- Canvas API (gauge rendering)
+- Capacitor (Android bridge)
 
-## Install on Headunit
+## Build
 
 ```bash
-adb install BMW-E60-Coder-Pro-AAOS.apk
+npm install
+npm run build    # Output: dist/
 ```
 
-Or sideload via USB stick.
+## Android Build
+
+```bash
+npm run build
+npx cap sync android
+cd android && ./gradlew assembleDebug
+```
+
+## GitHub Actions Setup
+
+1. Go to **Actions** tab in your repo
+2. Click **New workflow** > **set up a workflow yourself**
+3. Copy the content from `workflows/build.yml` in this repo
+4. Paste it into `.github/workflows/build.yml`
+5. Commit — the workflow will auto-build on every push and create releases on tags
+
+## Release
+
+Download the latest release from the [Releases](../../releases) page.
 
 ## License
 
-MIT - Use at your own risk.
+MIT
