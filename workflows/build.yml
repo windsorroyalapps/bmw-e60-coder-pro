@@ -1,4 +1,4 @@
-name: Build & Release
+name: Build & Release BMW E60 Coder Pro
 
 on:
   push:
@@ -42,24 +42,52 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npx cap sync android
+
       - uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
       - uses: android-actions/setup-android@v3
-      - run: chmod +x android/gradlew
-      - run: cd android && ./gradlew assembleDebug
-      - uses: actions/upload-artifact@v4
+
+      - name: Make gradlew executable
+        run: chmod +x android/gradlew
+
+      # Build Debug APK (always)
+      - name: Build Debug APK
+        run: cd android && ./gradlew assembleDebug
+
+      - name: Upload Debug APK
+        uses: actions/upload-artifact@v4
         with:
-          name: android-apk
+          name: bmw-e60-coder-pro-debug
           path: android/app/build/outputs/apk/debug/app-debug.apk
-      - if: startsWith(github.ref, 'refs/tags/v')
+
+      # Build Signed Release APK
+      - name: Build Release APK
+        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
-          mkdir -p release
-          cp android/app/build/outputs/apk/debug/app-debug.apk release/BMW-E60-Coder-Pro.apk
-      - if: startsWith(github.ref, 'refs/tags/v')
+          cd android
+          ./gradlew assembleRelease
+
+      - name: Upload Release APK
+        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: bmw-e60-coder-pro-release
+          path: android/app/build/outputs/apk/release/app-release.apk
+
+      # Attach to GitHub Release (on tags)
+      - name: Release APKs
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v1
         with:
-          files: release/BMW-E60-Coder-Pro.apk
+          files: |
+            android/app/build/outputs/apk/debug/app-debug.apk
+            android/app/build/outputs/apk/release/app-release.apk
+          generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
