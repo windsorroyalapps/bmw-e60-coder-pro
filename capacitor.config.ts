@@ -7,17 +7,15 @@ const config: CapacitorConfig = {
   android: {
     backgroundColor: '#0a0a0a',
     allowMixedContent: true,
-    captureInput: true,
-    webContentsDebuggingEnabled: false,
+  },
+  server: {
+    cleartext: true,
   },
   plugins: {
     SplashScreen: {
       backgroundColor: '#0a0a0a',
       androidScaleType: 'CENTER_CROP',
     },
-  },
-  server: {
-    cleartext: true,
   },
 };
 
