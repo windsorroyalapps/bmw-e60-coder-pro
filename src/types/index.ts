@@ -263,3 +263,60 @@ export interface ConnectionStatus {
   kombiDetected: boolean;
   lastError?: string;
 }
+
+// ============================================================================
+// Flash Backup / Restore System
+// ============================================================================
+
+export interface BackupSector {
+  name: string;
+  startAddress: string;
+  size: number;
+  checksum: string;
+  backedUp: boolean;
+}
+
+export interface FlashBackup {
+  id: string;
+  createdAt: number;
+  vin: string;
+  ecuType: string;
+  softwareVersion: string;
+  engineType: EngineType;
+  mapType: MapType;
+  batteryVoltage: number;
+  sectors: BackupSector[];
+  totalBytes: number;
+  status: 'pending' | 'in_progress' | 'complete' | 'failed';
+  progress: number;
+}
+
+export interface BackupResult {
+  success: boolean;
+  backup?: FlashBackup;
+  error?: string;
+}
+
+export interface RestoreResult {
+  success: boolean;
+  sectorsRestored: number;
+  sectorsTotal: number;
+  error?: string;
+}
+
+// ============================================================================
+// Diagnostic Trouble Codes (DTC)
+// ============================================================================
+
+export interface DTCReading {
+  ecuName: string;
+  ecuAddress: string;
+  codes: {
+    code: string;
+    status: 'active' | 'pending' | 'permanent' | 'stored';
+    description: string;
+    firstSeen?: number;
+    lastSeen?: number;
+    count?: number;
+  }[];
+}
