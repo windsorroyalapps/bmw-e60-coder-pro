@@ -4,11 +4,16 @@ import { obd2Manager } from '@/lib/obd2Connection';
 import {
   CircleDot, WifiOff, Plug, Unplug, Zap,
   Battery, AlertTriangle, Loader,
-  ChevronDown, ChevronUp, Cpu
+  ChevronDown, ChevronUp, Cpu, Shield, ShieldOff,
+  HeartPulse
 } from 'lucide-react';
 
 export const ConnectionBar: React.FC = () => {
-  const { obd2, setObd2, setObd2Cable, setShowFlashModal } = useStore();
+  const {
+    obd2, setObd2, setObd2Cable, setShowFlashModal,
+    watchdogEnabled, setWatchdogEnabled, connectionDead,
+    autoReconnectAttempts, maxAutoReconnectAttempts,
+  } = useStore();
   const [expanded, setExpanded] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
 
@@ -104,6 +109,34 @@ export const ConnectionBar: React.FC = () => {
           <div className="flex items-center gap-1.5 text-xs text-gray-500">
             <Zap className="w-3.5 h-3.5" />
             <span>{obd2.dmeProtocolVersion}</span>
+          </div>
+        )}
+
+        {/* Watchdog / Connection Dead Indicator */}
+        {obd2.connectionState === 'connected' && (
+          <div className="flex items-center gap-2">
+            {connectionDead ? (
+              <div className="flex items-center gap-1.5 text-xs bg-red-500/10 text-red-400 px-2 py-1 rounded border border-red-500/20 animate-pulse">
+                <HeartPulse className="w-3.5 h-3.5" />
+                <span>DEAD</span>
+                {autoReconnectAttempts > 0 && (
+                  <span className="text-gray-400">({autoReconnectAttempts}/{maxAutoReconnectAttempts})</span>
+                )}
+              </div>
+            ) : (
+              <button
+                onClick={() => setWatchdogEnabled(!watchdogEnabled)}
+                title={watchdogEnabled ? 'Watchdog active (500ms)' : 'Watchdog disabled'}
+                className={`flex items-center gap-1 text-xs px-2 py-1 rounded border transition-colors ${
+                  watchdogEnabled
+                    ? 'bg-green-500/10 text-green-400 border-green-500/20 hover:bg-green-500/20'
+                    : 'bg-gray-800 text-gray-500 border-gray-700 hover:bg-gray-700'
+                }`}
+              >
+                {watchdogEnabled ? <Shield className="w-3 h-3" /> : <ShieldOff className="w-3 h-3" />}
+                <span className="hidden sm:inline">{watchdogEnabled ? 'WD' : 'WD Off'}</span>
+              </button>
+            )}
           </div>
         )}
 
