@@ -29,6 +29,8 @@ interface AppState {
   updateLiveData: (d: Partial<LiveData>) => void;
   isLogging: boolean;
   setIsLogging: (v: boolean) => void;
+  obd2ConnectionPaused: boolean;
+  setObd2ConnectionPaused: (v: boolean) => void;
   logSessions: LogSession[];
   currentSession: LogSession | null;
   startSession: (name: string) => void;
@@ -146,7 +148,9 @@ export const useStore = create<AppState>((set, get) => ({
   liveData: defaultLiveData,
   updateLiveData: (d) => set((s) => ({ liveData: { ...s.liveData, ...d, timestamp: Date.now() } })),
   isLogging: false,
-  setIsLogging: (v) => set({ isAiTuning: v }),
+  setIsLogging: (v) => set({ isLogging: v }),
+  obd2ConnectionPaused: false,
+  setObd2ConnectionPaused: (v) => set({ obd2ConnectionPaused: v }),
   logSessions: [],
   currentSession: null,
   startSession: (name) => {
