@@ -5,12 +5,10 @@ import androidx.car.app.CarContext;
 import androidx.car.app.Screen;
 import androidx.car.app.model.Action;
 import androidx.car.app.model.CarIcon;
-import androidx.car.app.model.ParkedOnlyOnClickListener;
 import androidx.car.app.model.Template;
 import androidx.car.app.model.GridTemplate;
 import androidx.car.app.model.Row;
 import androidx.core.graphics.drawable.IconCompat;
-import android.graphics.Color;
 import com.bmwe60.coderpro.R;
 
 /**
@@ -19,8 +17,8 @@ import com.bmwe60.coderpro.R;
  */
 public class HomeScreen extends Screen {
 
-    public HomeScreen(@NonNull Screen.ScreenListener listener) {
-        super(listener);
+    public HomeScreen(@NonNull CarContext carContext) {
+        super(carContext);
     }
 
     @NonNull
@@ -37,7 +35,7 @@ public class HomeScreen extends Screen {
                                                 .setImage(new CarIcon.Builder(
                                                         IconCompat.createWithResource(getCarContext(), R.drawable.ic_launcher_foreground)
                                                 ).build())
-                                                .setOnClickListener(() -> screenManager.push(new ConnectionScreen(this)))
+                                                .setOnClickListener(() -> getScreenManager().push(new ConnectionScreen(getCarContext())))
                                                 .build()
                                 )
                                 .addItem(
@@ -46,7 +44,7 @@ public class HomeScreen extends Screen {
                                                 .setImage(new CarIcon.Builder(
                                                         IconCompat.createWithResource(getCarContext(), R.drawable.ic_launcher_foreground)
                                                 ).build())
-                                                .setOnClickListener(() -> screenManager.push(new GaugesScreen(this)))
+                                                .setOnClickListener(() -> getScreenManager().push(new GaugesScreen(getCarContext())))
                                                 .build()
                                 )
                                 .addItem(
@@ -55,7 +53,7 @@ public class HomeScreen extends Screen {
                                                 .setImage(new CarIcon.Builder(
                                                         IconCompat.createWithResource(getCarContext(), R.drawable.ic_launcher_foreground)
                                                 ).build())
-                                                .setOnClickListener(() -> screenManager.push(new TuningScreen(this)))
+                                                .setOnClickListener(() -> getScreenManager().push(new TuningScreen(getCarContext())))
                                                 .build()
                                 )
                                 .addItem(
@@ -64,7 +62,7 @@ public class HomeScreen extends Screen {
                                                 .setImage(new CarIcon.Builder(
                                                         IconCompat.createWithResource(getCarContext(), R.drawable.ic_launcher_foreground)
                                                 ).build())
-                                                .setOnClickListener(() -> screenManager.push(new FlashScreen(this)))
+                                                .setOnClickListener(() -> getScreenManager().push(new FlashScreen(getCarContext())))
                                                 .build()
                                 )
                                 .build()
