@@ -2,6 +2,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.bmwe60.coderpro">
 
+    <!-- Android Auto support -->
+    <uses-feature android:name="android.hardware.type.automotive" android:required="false" />
     <uses-feature android:name="android.hardware.usb.host" android:required="false" />
     <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
     <uses-feature android:name="android.hardware.gamepad" android:required="false" />
@@ -16,6 +18,20 @@
         android:usesCleartextTraffic="true"
         android:requestLegacyExternalStorage="true"
         android:hardwareAccelerated="true">
+
+        <!-- Android Auto projection support -->
+        <meta-data android:name="com.google.android.gms.car.application"
+            android:resource="@xml/automotive_app_desc" />
+
+        <!-- Car App Service for Android Auto -->
+        <service
+            android:name=".CarAppService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="androidx.car.app.CarAppService" />
+                <category android:name="androidx.car.app.category.PROJECTION" />
+            </intent-filter>
+        </service>
 
         <activity
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation"
