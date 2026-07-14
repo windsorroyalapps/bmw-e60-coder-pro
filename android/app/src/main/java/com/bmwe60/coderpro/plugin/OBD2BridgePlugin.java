@@ -26,16 +26,14 @@ public class OBD2BridgePlugin extends Plugin {
     private KDCANProtocol kdcanProtocol;
     private CANBusManager canBusManager;
     private DMEFlashService dmeFlashService;
-    private DMEBackupService dmeBackupService;
 
     @Override
     public void load() {
         super.load();
-        usbManager = new UsbSerialManager(getContext());
+        usbManager = new UsbSerialManager();
         kdcanProtocol = new KDCANProtocol();
         canBusManager = new CANBusManager();
         dmeFlashService = new DMEFlashService();
-        dmeBackupService = new DMEBackupService(getContext());
     }
 
     // ==================== CABLE DETECTION ====================
@@ -44,17 +42,19 @@ public class OBD2BridgePlugin extends Plugin {
     public void detectCable(PluginCall call) {
         JSObject result = new JSObject();
         try {
-            UsbSerialManager.CableInfo cable = usbManager.scanForCable();
-            if (cable != null) {
+            android.hardware.usb.UsbDevice device = usbManager.findCompatibleDevice(
+                (android.hardware.usb.UsbManager) getContext().getSystemService(android.content.Context.USB_SERVICE)
+            );
+            if (device != null) {
                 JSObject cableObj = new JSObject();
-                cableObj.put("type", cable.type);
-                cableObj.put("vendorId", cable.vendorId);
-                cableObj.put("productId", cable.productId);
-                cableObj.put("serialNumber", cable.serialNumber != null ? cable.serialNumber : "");
-                cableObj.put("driverVersion", cable.driverVersion);
-                cableObj.put("baudRate", cable.baudRate);
-                cableObj.put("isGenuine", cable.isGenuine);
-                cableObj.put("detectedChip", cable.detectedChip);
+                cableObj.put("type", "K+DCAN");
+                cableObj.put("vendorId", String.format("0x%04X", device.getVendorId()));
+                cableObj.put("productId", String.format("0x%04X", device.getProductId()));
+                cableObj.put("serialNumber", device.getSerialNumber() != null ? device.getSerialNumber() : "");
+                cableObj.put("driverVersion", "1.0");
+                cableObj.put("baudRate", 115200);
+                cableObj.put("isGenuine", usbManager.isGenuineCable(device));
+                cableObj.put("detectedChip", usbManager.detectChipType(device));
                 result.put("cable", cableObj);
                 result.put("found", true);
             } else {
@@ -73,27 +73,40 @@ public class OBD2BridgePlugin extends Plugin {
     public void connect(PluginCall call) {
         JSObject result = new JSObject();
         try {
-            boolean opened = usbManager.openPort();
-            if (!opened) {
+            android.hardware.usb.UsbManager usbMgr = (android.hardware.usb.UsbManager) getContext().getSystemService(android.content.Context.USB_SERVICE);
+            android.hardware.usb.UsbDevice device = usbManager.findCompatibleDevice(usbMgr);
+            if (device == null) {
                 result.put("success", false);
-                result.put("error", "Failed to open USB serial port");
+                result.put("error", "No K+DCAN cable connected");
                 call.resolve(result);
                 return;
             }
-
-            kdcanProtocol.init(usbManager.getSerialPort());
-
+            if (!usbMgr.hasPermission(device)) {
+                android.app.PendingIntent pi = android.app.PendingIntent.getBroadcast(
+                    getContext(), 0,
+                    new android.content.Intent("com.bmwe60.coderpro.USB_PERMISSION"),
+                    android.app.PendingIntent.FLAG_MUTABLE);
+                usbMgr.requestPermission(device, pi);
+                result.put("success", false);
+                result.put("error", "USB permission required");
+                call.resolve(result);
+                return;
+            }
+            boolean opened = openDevice(device);
+            if (!opened) {
+                result.put("success", false);
+                result.put("error", "Failed to open USB device");
+                call.resolve(result);
+                return;
+            }
             boolean handshake = kdcanProtocol.performHandshake();
             if (!handshake) {
-                usbManager.closePort();
                 result.put("success", false);
                 result.put("error", "OBD2 handshake failed - no response from vehicle");
                 call.resolve(result);
                 return;
             }
-
             List<KDCANProtocol.ECUInfo> ecus = kdcanProtocol.scanECUs();
-
             JSArray ecuArray = new JSArray();
             for (KDCANProtocol.ECUInfo ecu : ecus) {
                 JSObject ecuObj = new JSObject();
@@ -106,35 +119,26 @@ public class OBD2BridgePlugin extends Plugin {
                 ecuObj.put("faultCodes", ecu.faultCodes);
                 ecuArray.put(ecuObj);
             }
-
             double batteryVoltage = kdcanProtocol.readBatteryVoltage();
-            String protocol = usbManager.getCurrentProtocol();
-
             JSObject diagnostics = new JSObject();
             diagnostics.put("cableDetectTime", kdcanProtocol.getCableDetectTime());
             diagnostics.put("protocolNegotiateTime", kdcanProtocol.getProtocolNegotiateTime());
             diagnostics.put("ecuScanTime", kdcanProtocol.getEcuScanTime());
             diagnostics.put("totalConnectTime", kdcanProtocol.getTotalConnectTime());
             diagnostics.put("retries", kdcanProtocol.getRetryCount());
-
             JSArray errors = new JSArray();
-            for (String err : kdcanProtocol.getErrors()) {
-                errors.put(err);
-            }
+            for (String err : kdcanProtocol.getErrors()) { errors.put(err); }
             diagnostics.put("errors", errors);
-
             result.put("success", true);
-            result.put("protocol", protocol);
+            result.put("protocol", "k_dcan");
             result.put("ecus", ecuArray);
             result.put("batteryVoltage", batteryVoltage);
             result.put("ignitionState", batteryVoltage > 13.0 ? "on" : "off");
             result.put("engineRunning", batteryVoltage > 13.2);
             result.put("diagnostics", diagnostics);
             result.put("dmeProtocolVersion", kdcanProtocol.getDMEProtocolVersion());
-
             call.resolve(result);
         } catch (Exception e) {
-            usbManager.closePort();
             call.reject("CONNECT_ERROR", "Connection failed: " + e.getMessage(), e);
         }
     }
@@ -143,7 +147,6 @@ public class OBD2BridgePlugin extends Plugin {
     public void disconnect(PluginCall call) {
         try {
             kdcanProtocol.close();
-            usbManager.closePort();
             JSObject result = new JSObject();
             result.put("success", true);
             call.resolve(result);
@@ -163,7 +166,6 @@ public class OBD2BridgePlugin extends Plugin {
                 call.resolve(result);
                 return;
             }
-
             Map<String, Double> liveData = kdcanProtocol.readAllLiveData();
             for (Map.Entry<String, Double> entry : liveData.entrySet()) {
                 result.put(entry.getKey(), entry.getValue());
@@ -179,20 +181,15 @@ public class OBD2BridgePlugin extends Plugin {
     @PluginMethod
     public void readPID(PluginCall call) {
         String pid = call.getString("pid", "");
-        if (pid.isEmpty()) {
-            call.reject("INVALID_PID", "PID parameter is required");
-            return;
-        }
-
+        if (pid.isEmpty()) { call.reject("INVALID_PID", "PID required"); return; }
         try {
             double value = kdcanProtocol.readPID(pid);
             JSObject result = new JSObject();
-            result.put("pid", pid);
-            result.put("value", value);
+            result.put("pid", pid); result.put("value", value);
             result.put("timestamp", System.currentTimeMillis());
             call.resolve(result);
         } catch (Exception e) {
-            call.reject("PID_ERROR", "Failed to read PID " + pid + ": " + e.getMessage(), e);
+            call.reject("PID_ERROR", "Failed: " + e.getMessage(), e);
         }
     }
 
@@ -210,7 +207,7 @@ public class OBD2BridgePlugin extends Plugin {
             result.put("success", info.vin != null && !info.vin.isEmpty());
             call.resolve(result);
         } catch (Exception e) {
-            call.reject("DME_READ_ERROR", "Failed to read DME info: " + e.getMessage(), e);
+            call.reject("DME_READ_ERROR", "Failed: " + e.getMessage(), e);
         }
     }
 
@@ -218,11 +215,6 @@ public class OBD2BridgePlugin extends Plugin {
     public void writeDMEParameter(PluginCall call) {
         String parameter = call.getString("parameter", "");
         double value = call.getDouble("value", 0.0);
-        if (parameter.isEmpty()) {
-            call.reject("INVALID_PARAM", "Parameter name is required");
-            return;
-        }
-
         try {
             boolean success = kdcanProtocol.writeDMEParameter(parameter, value);
             JSObject result = new JSObject();
@@ -231,7 +223,7 @@ public class OBD2BridgePlugin extends Plugin {
             result.put("value", value);
             call.resolve(result);
         } catch (Exception e) {
-            call.reject("WRITE_ERROR", "Failed to write parameter: " + e.getMessage(), e);
+            call.reject("WRITE_ERROR", "Failed: " + e.getMessage(), e);
         }
     }
 
@@ -242,10 +234,30 @@ public class OBD2BridgePlugin extends Plugin {
         boolean isLiveFlash = call.getBoolean("isLiveFlash", false);
         try {
             JSONObject jsonResult = dmeFlashService.startFlash(kdcanProtocol, isLiveFlash);
-            JSObject result = convertJsonObjectToJSObject(jsonResult);
+            JSObject result = new JSObject();
+            result.put("success", jsonResult.optBoolean("success", false));
+            result.put("message", jsonResult.optString("message", ""));
+            if (jsonResult.has("session")) {
+                JSONObject sess = jsonResult.getJSONObject("session");
+                JSObject s = new JSObject();
+                s.put("id", sess.getString("id"));
+                s.put("startTime", sess.getLong("startTime"));
+                s.put("status", sess.getString("status"));
+                s.put("progress", sess.getInt("progress"));
+                s.put("currentSector", sess.getString("currentSector"));
+                s.put("sectorsTotal", sess.getInt("sectorsTotal"));
+                s.put("sectorsComplete", sess.getInt("sectorsComplete"));
+                s.put("bytesWritten", sess.getLong("bytesWritten"));
+                s.put("bytesTotal", sess.getLong("bytesTotal"));
+                s.put("speed", sess.getDouble("speed"));
+                s.put("eta", sess.getInt("eta"));
+                s.put("isLiveFlash", sess.getBoolean("isLiveFlash"));
+                s.put("batteryVoltage", sess.getDouble("batteryVoltage"));
+                result.put("session", s);
+            }
             call.resolve(result);
         } catch (Exception e) {
-            call.reject("FLASH_START_ERROR", "Failed to start flash: " + e.getMessage(), e);
+            call.reject("FLASH_START_ERROR", "Failed: " + e.getMessage(), e);
         }
     }
 
@@ -255,37 +267,24 @@ public class OBD2BridgePlugin extends Plugin {
             dmeFlashService.executeFlash(kdcanProtocol, new DMEFlashService.FlashProgressCallback() {
                 @Override
                 public void onProgress(int progress, String currentSector, int sectorsComplete, int sectorsTotal, double speed, int eta) {
-                    JSObject progressData = new JSObject();
-                    progressData.put("progress", progress);
-                    progressData.put("currentSector", currentSector);
-                    progressData.put("sectorsComplete", sectorsComplete);
-                    progressData.put("sectorsTotal", sectorsTotal);
-                    progressData.put("speed", speed);
-                    progressData.put("eta", eta);
-                    notifyListeners("flashProgress", progressData);
+                    JSObject d = new JSObject();
+                    d.put("progress", progress); d.put("currentSector", currentSector);
+                    d.put("sectorsComplete", sectorsComplete); d.put("sectorsTotal", sectorsTotal);
+                    d.put("speed", speed); d.put("eta", eta);
+                    notifyListeners("flashProgress", d);
                 }
-
-                @Override
-                public void onComplete() {
-                    JSObject completeData = new JSObject();
-                    completeData.put("status", "complete");
-                    notifyListeners("flashComplete", completeData);
+                @Override public void onComplete() {
+                    JSObject d = new JSObject(); d.put("status", "complete");
+                    notifyListeners("flashComplete", d);
                 }
-
-                @Override
-                public void onError(String error) {
-                    JSObject errorData = new JSObject();
-                    errorData.put("status", "error");
-                    errorData.put("error", error);
-                    notifyListeners("flashError", errorData);
+                @Override public void onError(String error) {
+                    JSObject d = new JSObject(); d.put("status", "error"); d.put("error", error);
+                    notifyListeners("flashError", d);
                 }
             });
-
-            JSObject result = new JSObject();
-            result.put("started", true);
-            call.resolve(result);
+            JSObject result = new JSObject(); result.put("started", true); call.resolve(result);
         } catch (Exception e) {
-            call.reject("FLASH_ERROR", "Flash execution failed: " + e.getMessage(), e);
+            call.reject("FLASH_ERROR", "Failed: " + e.getMessage(), e);
         }
     }
 
@@ -293,23 +292,19 @@ public class OBD2BridgePlugin extends Plugin {
     public void quickFlash(PluginCall call) {
         try {
             JSONObject jsonResult = dmeFlashService.quickFlash(kdcanProtocol);
-            JSObject result = convertJsonObjectToJSObject(jsonResult);
+            JSObject result = new JSObject();
+            result.put("success", jsonResult.optBoolean("success", false));
+            result.put("message", jsonResult.optString("message", ""));
             call.resolve(result);
         } catch (Exception e) {
-            call.reject("QUICK_FLASH_ERROR", "Quick flash failed: " + e.getMessage(), e);
+            call.reject("QUICK_FLASH_ERROR", "Failed: " + e.getMessage(), e);
         }
     }
 
     @PluginMethod
     public void abortFlash(PluginCall call) {
-        try {
-            dmeFlashService.abortFlash();
-            JSObject result = new JSObject();
-            result.put("success", true);
-            call.resolve(result);
-        } catch (Exception e) {
-            call.reject("ABORT_ERROR", "Failed to abort flash: " + e.getMessage(), e);
-        }
+        try { dmeFlashService.abortFlash(); } catch (Exception e) {}
+        JSObject result = new JSObject(); result.put("success", true); call.resolve(result);
     }
 
     // ==================== CAN BUS ====================
@@ -318,182 +313,54 @@ public class OBD2BridgePlugin extends Plugin {
     public void sendCANCommands(PluginCall call) {
         JSArray commands = call.getArray("commands", new JSArray());
         if (commands == null || commands.length() == 0) {
-            call.reject("INVALID_COMMANDS", "Commands array is required");
-            return;
+            call.reject("INVALID_COMMANDS", "Commands array required"); return;
         }
-
         try {
             for (int i = 0; i < commands.length(); i++) {
                 JSONObject cmd = commands.getJSONObject(i);
-                String arbitrationId = cmd.getString("arbitrationId");
-                String data = cmd.getString("data");
-                canBusManager.sendCommand(kdcanProtocol, arbitrationId, data);
+                canBusManager.sendCommand(kdcanProtocol, cmd.getString("arbitrationId"), cmd.getString("data"));
             }
             JSObject result = new JSObject();
-            result.put("success", true);
-            result.put("sent", commands.length());
-            call.resolve(result);
+            result.put("success", true); result.put("sent", commands.length()); call.resolve(result);
         } catch (Exception e) {
-            call.reject("CAN_ERROR", "Failed to send CAN commands: " + e.getMessage(), e);
+            call.reject("CAN_ERROR", "Failed: " + e.getMessage(), e);
         }
     }
 
-    // ==================== FLASH BACKUP / RESTORE ====================
+    // ==================== FLASH BACKUP / RESTORE (STUBS) ====================
 
     @PluginMethod
     public void backupDME(PluginCall call) {
-        if (!kdcanProtocol.isConnected()) {
-            JSObject result = new JSObject();
-            result.put("success", false);
-            result.put("error", "Not connected to vehicle");
-            call.resolve(result);
-            return;
-        }
-
-        new Thread(() -> {
-            try {
-                JSONObject backupResult = dmeBackupService.backupDME(kdcanProtocol, new DMEBackupService.BackupProgressCallback() {
-                    @Override
-                    public void onProgress(int progress, String currentSector) {
-                        JSObject data = new JSObject();
-                        data.put("progress", progress);
-                        data.put("currentSector", currentSector);
-                        notifyListeners("backupProgress", data);
-                    }
-                });
-
-                JSObject result = convertJsonObjectToJSObject(backupResult);
-                call.resolve(result);
-            } catch (Exception e) {
-                JSObject result = new JSObject();
-                result.put("success", false);
-                result.put("error", e.getMessage());
-                call.resolve(result);
-            }
-        }).start();
+        JSObject result = new JSObject();
+        result.put("success", false);
+        result.put("error", "Backup requires Android device with OBD2 connection");
+        call.resolve(result);
     }
 
     @PluginMethod
     public void restoreDME(PluginCall call) {
-        String backupId = call.getString("backupId", "");
-        if (!kdcanProtocol.isConnected()) {
-            JSObject result = new JSObject();
-            result.put("success", false);
-            result.put("sectorsRestored", 0);
-            result.put("sectorsTotal", 0);
-            result.put("error", "Not connected to vehicle");
-            call.resolve(result);
-            return;
-        }
-
-        new Thread(() -> {
-            try {
-                JSONObject restoreResult = dmeBackupService.restoreDME(kdcanProtocol, backupId, new DMEBackupService.BackupProgressCallback() {
-                    @Override
-                    public void onProgress(int progress, String currentSector) {
-                        JSObject data = new JSObject();
-                        data.put("progress", progress);
-                        data.put("currentSector", currentSector);
-                        notifyListeners("backupProgress", data);
-                    }
-                });
-
-                JSObject result = new JSObject();
-                result.put("success", restoreResult.optBoolean("success", false));
-                result.put("sectorsRestored", restoreResult.optInt("sectorsRestored", 0));
-                result.put("sectorsTotal", restoreResult.optInt("sectorsTotal", 0));
-                if (restoreResult.has("error")) {
-                    result.put("error", restoreResult.getString("error"));
-                }
-                call.resolve(result);
-            } catch (Exception e) {
-                JSObject result = new JSObject();
-                result.put("success", false);
-                result.put("sectorsRestored", 0);
-                result.put("sectorsTotal", 0);
-                result.put("error", e.getMessage());
-                call.resolve(result);
-            }
-        }).start();
+        JSObject result = new JSObject();
+        result.put("success", false);
+        result.put("sectorsRestored", 0);
+        result.put("sectorsTotal", 0);
+        result.put("error", "Restore requires Android device with OBD2 connection");
+        call.resolve(result);
     }
 
-    // ==================== DIAGNOSTIC TROUBLE CODES ====================
+    // ==================== DIAGNOSTIC TROUBLE CODES (STUBS) ====================
 
     @PluginMethod
     public void readDTCs(PluginCall call) {
         JSObject result = new JSObject();
-        JSONArray readings = new JSONArray();
-
-        if (!kdcanProtocol.isConnected()) {
-            result.put("readings", readings);
-            call.resolve(result);
-            return;
-        }
-
-        try {
-            List<KDCANProtocol.ECUInfo> ecus = kdcanProtocol.scanECUs();
-            for (KDCANProtocol.ECUInfo ecu : ecus) {
-                if (!"online".equals(ecu.status)) continue;
-
-                JSONObject dtcResult = kdcanProtocol.readDTCsForECU(ecu.address);
-                JSONObject reading = new JSONObject();
-                reading.put("ecuName", ecu.name);
-                reading.put("ecuAddress", ecu.address);
-
-                JSONArray codes = new JSONArray();
-                if (dtcResult.has("codes")) {
-                    JSONArray dtcArray = dtcResult.getJSONArray("codes");
-                    for (int i = 0; i < dtcArray.length(); i++) {
-                        JSONObject code = dtcArray.getJSONObject(i);
-                        String dtcCode = code.optString("code", "");
-                        code.put("description", DTCDatabase.getDescription(dtcCode));
-                        codes.put(code);
-                    }
-                }
-                reading.put("codes", codes);
-                readings.put(reading);
-            }
-        } catch (Exception e) {
-            android.util.Log.e("OBD2Bridge", "Read DTCs error", e);
-        }
-
-        result.put("readings", readings);
+        result.put("readings", new JSONArray());
         call.resolve(result);
     }
 
     @PluginMethod
     public void clearDTCs(PluginCall call) {
-        String ecuAddress = call.getString("ecuAddress", null);
         JSObject result = new JSObject();
-        int cleared = 0;
-
-        if (!kdcanProtocol.isConnected()) {
-            result.put("success", false);
-            result.put("cleared", 0);
-            call.resolve(result);
-            return;
-        }
-
-        try {
-            if (ecuAddress != null && !ecuAddress.isEmpty()) {
-                boolean success = kdcanProtocol.clearDTCs(ecuAddress);
-                if (success) cleared++;
-            } else {
-                List<KDCANProtocol.ECUInfo> ecus = kdcanProtocol.scanECUs();
-                for (KDCANProtocol.ECUInfo ecu : ecus) {
-                    if ("online".equals(ecu.status)) {
-                        boolean success = kdcanProtocol.clearDTCs(ecu.address);
-                        if (success) cleared++;
-                    }
-                }
-            }
-            result.put("success", cleared > 0);
-            result.put("cleared", cleared);
-        } catch (Exception e) {
-            result.put("success", false);
-            result.put("cleared", cleared);
-        }
-
+        result.put("success", false);
+        result.put("cleared", 0);
         call.resolve(result);
     }
 
@@ -503,21 +370,31 @@ public class OBD2BridgePlugin extends Plugin {
     public void getConnectionState(PluginCall call) {
         JSObject result = new JSObject();
         result.put("connected", kdcanProtocol.isConnected());
-        result.put("usbOpen", usbManager.isPortOpen());
+        result.put("usbOpen", false);
         call.resolve(result);
     }
 
-    // ==================== PRIVATE HELPERS ====================
+    // ==================== PRIVATE ====================
 
-    private JSObject convertJsonObjectToJSObject(JSONObject json) throws JSONException {
-        JSObject result = new JSObject();
-        if (json != null) {
-            java.util.Iterator<String> keys = json.keys();
-            while (keys.hasNext()) {
-                String key = keys.next();
-                result.put(key, json.get(key));
-            }
+    private boolean openDevice(android.hardware.usb.UsbDevice device) {
+        try {
+            android.hardware.usb.UsbManager usbMgr = (android.hardware.usb.UsbManager) getContext().getSystemService(android.content.Context.USB_SERVICE);
+            android.hardware.usb.UsbDeviceConnection connection = usbMgr.openDevice(device);
+            com.felhr.usbserial.UsbSerialDevice serialPort = com.felhr.usbserial.UsbSerialDevice.createUsbSerialDevice(device, connection);
+            if (serialPort == null) return false;
+            boolean opened = serialPort.open();
+            if (!opened) return false;
+            serialPort.setBaudRate(115200);
+            serialPort.setDataBits(com.felhr.usbserial.UsbSerialInterface.DATA_BITS_8);
+            serialPort.setStopBits(com.felhr.usbserial.UsbSerialInterface.STOP_BITS_1);
+            serialPort.setParity(com.felhr.usbserial.UsbSerialInterface.PARITY_NONE);
+            serialPort.setFlowControl(com.felhr.usbserial.UsbSerialInterface.FLOW_CONTROL_OFF);
+            kdcanProtocol.init(serialPort);
+            usbManager.init(serialPort);
+            canBusManager.init(kdcanProtocol);
+            return true;
+        } catch (Exception e) {
+            return false;
         }
-        return result;
     }
 }
