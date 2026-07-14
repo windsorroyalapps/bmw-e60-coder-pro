@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { useStore } from '@/hooks/useStore';
+import { exportSessionToCSV, exportCombinedCSV } from '@/lib/csvExport';
 import {
   FileText, Play, Square, Clock,
-  AlertTriangle, Activity, Zap
+  AlertTriangle, Activity, Zap, Download, FolderOutput
 } from 'lucide-react';
 
 export const LogsPage: React.FC = () => {
@@ -43,6 +44,28 @@ export const LogsPage: React.FC = () => {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            {/* Export buttons (visible when sessions exist) */}
+            {logSessions.length > 0 && (
+              <>
+                <button
+                  onClick={() => activeSession && exportSessionToCSV(activeSession)}
+                  disabled={!activeSession}
+                  className="flex items-center gap-1.5 bg-blue-600/20 hover:bg-blue-600/30 disabled:opacity-30 text-blue-400 text-xs px-3 py-2 rounded-lg transition-colors border border-blue-500/20"
+                  title="Export current session as CSV"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  Export
+                </button>
+                <button
+                  onClick={() => exportCombinedCSV(logSessions)}
+                  className="flex items-center gap-1.5 bg-purple-600/20 hover:bg-purple-600/30 text-purple-400 text-xs px-3 py-2 rounded-lg transition-colors border border-purple-500/20"
+                  title="Export all sessions as combined CSV"
+                >
+                  <FolderOutput className="w-3.5 h-3.5" />
+                  Export All
+                </button>
+              </>
+            )}
             {isLogging ? (
               <button
                 onClick={stopSession}
