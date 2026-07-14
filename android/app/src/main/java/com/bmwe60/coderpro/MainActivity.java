@@ -1,6 +1,7 @@
 package com.bmwe60.coderpro;
 
 import com.getcapacitor.BridgeActivity;
+import com.bmwe60.coderpro.plugin.OBD2BridgePlugin;
 import android.os.Bundle;
 import android.view.WindowManager;
 
@@ -15,7 +16,16 @@ public class MainActivity extends BridgeActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        
+        // Register OBD2 native bridge plugin
+        registerPlugin(OBD2BridgePlugin.class);
+        
         // Keep screen on during flash operations
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+    }
+    
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
     }
 }
