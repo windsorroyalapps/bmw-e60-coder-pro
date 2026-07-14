@@ -1,4 +1,7 @@
 // BMW E60 Coder Pro - Global State Store
+// 100% LIVE - All data comes from real OBD2 via native Android bridge.
+// No simulation. No mock data. No Math.random().
+
 import { create } from 'zustand';
 import type {
   MapType, LiveData, LogSession,
@@ -72,33 +75,76 @@ interface AppState {
 }
 
 const defaultProfile: VehicleProfile = {
-  id: 'default', name: 'My E60', vin: 'WBANXXXXXX', engine: 'n54',
-  transmission: 'auto_6', injector: 'stock',
-  hasUpgradedIntercooler: false, hasUpgradedTurbo: false, hasUpgradedFuelPump: false,
-  hasUpgradedClutch: false, hasMethInjection: false, hasDownpipes: false,
-  hasExhaust: false, hasUpgradedChargepipe: false, currentMap: 'stock',
-  mileage: 120000, notes: '',
+  id: 'default',
+  name: 'My E60',
+  vin: '', // Empty until read from actual DME
+  engine: 'n54',
+  transmission: 'auto_6',
+  injector: 'stock',
+  hasUpgradedIntercooler: false,
+  hasUpgradedTurbo: false,
+  hasUpgradedFuelPump: false,
+  hasUpgradedClutch: false,
+  hasMethInjection: false,
+  hasDownpipes: false,
+  hasExhaust: false,
+  hasUpgradedChargepipe: false,
+  currentMap: 'stock',
+  mileage: 0, // Will be read from ECU
+  notes: '',
 };
 
+// Live data starts at zero - will be populated from real OBD2 reads
 const defaultLiveData: LiveData = {
-  rpm: 850, speed: 0, coolantTemp: 92, oilTemp: 95, oilPressure: 2.2,
-  boost: -0.7, iat: 35, afr: 1.0, throttle: 0, load: 12, timing: 15,
-  fuelPressure: 5.0, battery: 14.2, knock: 0, lambda: 1.0, mapPressure: 0.95,
-  maf: 15, fuelTrimShort: 0, fuelTrimLong: 2, dutyCycle: 3,
-  tqActual: 45, tqRequested: 40, turbineInlet: 650, turbineOutlet: 480,
-  timestamp: Date.now(),
+  rpm: 0,
+  speed: 0,
+  coolantTemp: 0,
+  oilTemp: 0,
+  oilPressure: 0,
+  boost: 0,
+  iat: 0,
+  afr: 0,
+  throttle: 0,
+  load: 0,
+  timing: 0,
+  fuelPressure: 0,
+  battery: 12.6,
+  knock: 0,
+  lambda: 0,
+  mapPressure: 0,
+  maf: 0,
+  fuelTrimShort: 0,
+  fuelTrimLong: 0,
+  dutyCycle: 0,
+  tqActual: 0,
+  tqRequested: 0,
+  turbineInlet: 0,
+  turbineOutlet: 0,
+  timestamp: 0,
 };
 
 const defaultObd2: OBD2State = {
-  connectionState: 'disconnected', cable: null, protocol: 'none', ecus: [],
-  batteryVoltage: 12.6, ignitionState: 'off', engineRunning: false,
-  vehicleSpeed: 0, rpm: 0, diagnostics: null, lastError: null,
-  lastActivity: 0, autoConnect: true, dmeProtocolVersion: '',
+  connectionState: 'disconnected',
+  cable: null,
+  protocol: 'none',
+  ecus: [],
+  batteryVoltage: 12.6,
+  ignitionState: 'off',
+  engineRunning: false,
+  vehicleSpeed: 0,
+  rpm: 0,
+  diagnostics: null,
+  lastError: null,
+  lastActivity: 0,
+  autoConnect: true,
+  dmeProtocolVersion: '',
 };
 
 const defaultGaugeLayouts: GaugeLayout[] = [
   {
-    id: 'default', name: 'Default', isDefault: true,
+    id: 'default',
+    name: 'Default',
+    isDefault: true,
     gauges: [
       { id: 'rpm', type: 'rpm', position: { x: 0, y: 0, w: 4, h: 4 }, min: 0, max: 8000, warningThreshold: 6500, dangerThreshold: 7200, unit: 'RPM', label: 'RPM' },
       { id: 'boost', type: 'boost', position: { x: 4, y: 0, w: 4, h: 4 }, min: -1, max: 2.5, warningThreshold: 1.8, dangerThreshold: 2.2, unit: 'bar', label: 'Boost' },
@@ -110,7 +156,9 @@ const defaultGaugeLayouts: GaugeLayout[] = [
     ],
   },
   {
-    id: 'performance', name: 'Performance', isDefault: false,
+    id: 'performance',
+    name: 'Performance',
+    isDefault: false,
     gauges: [
       { id: 'rpm', type: 'rpm', position: { x: 0, y: 0, w: 6, h: 6 }, min: 0, max: 8000, warningThreshold: 6500, dangerThreshold: 7200, unit: 'RPM', label: 'RPM' },
       { id: 'boost', type: 'boost', position: { x: 6, y: 0, w: 6, h: 6 }, min: -1, max: 2.5, warningThreshold: 1.8, dangerThreshold: 2.2, unit: 'bar', label: 'Boost' },
@@ -120,7 +168,9 @@ const defaultGaugeLayouts: GaugeLayout[] = [
     ],
   },
   {
-    id: 'turbo', name: 'Turbo Monitor', isDefault: false,
+    id: 'turbo',
+    name: 'Turbo Monitor',
+    isDefault: false,
     gauges: [
       { id: 'boost', type: 'boost', position: { x: 0, y: 0, w: 6, h: 6 }, min: -1, max: 2.5, warningThreshold: 1.8, dangerThreshold: 2.2, unit: 'bar', label: 'Boost' },
       { id: 'turbine_in', type: 'turbine_inlet', position: { x: 6, y: 0, w: 3, h: 3 }, min: 400, max: 1000, warningThreshold: 850, dangerThreshold: 950, unit: '°C', label: 'Turbine In' },
@@ -134,11 +184,17 @@ const defaultGaugeLayouts: GaugeLayout[] = [
 ];
 
 export const useStore = create<AppState>((set, get) => ({
-  // Connection
+  // Connection - starts disconnected, no fake connected state
   connection: {
-    connected: true, protocol: 'k_dcan', ecuConnected: true,
-    batteryVoltage: 14.2, vehicleDetected: true, dmeDetected: true,
-    egsDetected: true, dscDetected: true, kombiDetected: true,
+    connected: false,
+    protocol: 'none',
+    ecuConnected: false,
+    batteryVoltage: 12.6,
+    vehicleDetected: false,
+    dmeDetected: false,
+    egsDetected: false,
+    dscDetected: false,
+    kombiDetected: false,
   },
   setConnection: (c) => set((s) => ({ connection: { ...s.connection, ...c } })),
 
@@ -172,7 +228,7 @@ export const useStore = create<AppState>((set, get) => ({
     set({ currentMap: map, profile: { ...profile, currentMap: mapType } });
   },
 
-  // Live Data
+  // Live Data - starts at zero, populated from real OBD2
   liveData: defaultLiveData,
   updateLiveData: (d) => set((s) => ({ liveData: { ...s.liveData, ...d, timestamp: Date.now() } })),
   isLogging: false,
@@ -183,9 +239,19 @@ export const useStore = create<AppState>((set, get) => ({
   currentSession: null,
   startSession: (name) => {
     set({ currentSession: {
-      id: `session_${Date.now()}`, name, startTime: Date.now(), entries: [],
-      engineType: get().profile.engine, mapType: get().profile.currentMap,
-      maxRpm: 0, maxBoost: 0, maxSpeed: 0, maxIat: 0, knockEvents: 0, avgAfr: 1.0, aiRecommendations: [],
+      id: `session_${Date.now()}`,
+      name,
+      startTime: Date.now(),
+      entries: [],
+      engineType: get().profile.engine,
+      mapType: get().profile.currentMap,
+      maxRpm: 0,
+      maxBoost: 0,
+      maxSpeed: 0,
+      maxIat: 0,
+      knockEvents: 0,
+      avgAfr: 1.0,
+      aiRecommendations: [],
     }, isLogging: true });
   },
   stopSession: () => {
@@ -246,57 +312,3 @@ export const useStore = create<AppState>((set, get) => ({
   addNotification: (n) => set((s) => ({ notifications: [...s.notifications, { ...n, id: `notif_${Date.now()}` }] })),
   removeNotification: (id) => set((s) => ({ notifications: s.notifications.filter(n => n.id !== id) })),
 }));
-
-// Simulate live data
-let simInterval: ReturnType<typeof setInterval> | null = null;
-export function startLiveDataSimulation() {
-  if (simInterval) return;
-  simInterval = setInterval(() => {
-    const store = useStore.getState();
-    const { profile, isLogging, currentSession, obd2 } = store;
-    const engine = ENGINE_SPECS[profile.engine];
-    const baseRpm = store.liveData.rpm;
-    const rpmVariation = Math.random() * 100 - 50;
-    const newRpm = Math.max(700, Math.min(engine.revLimit, Math.round(baseRpm + rpmVariation)));
-    const loadPercent = Math.min(100, Math.round((newRpm / engine.revLimit) * 100 * (0.3 + Math.random() * 0.7)));
-    let boost = -0.7;
-    if (engine.stockBoost && newRpm > 1800) {
-      const mapMultipliers: Record<string, number> = { stock: 1, stage1: 1.3, stage2: 1.6, stage2plus: 1.9, stage3: 2.3, custom: 1.4, economy: 0.85, valet: 0.3, anti_theft: 0 };
-      const mult = mapMultipliers[profile.currentMap] || 1;
-      boost = Math.min(engine.maxSafeBoost! * mult, engine.stockBoost * mult * (loadPercent / 100) * (newRpm > 2500 ? 1 : newRpm / 2500));
-      boost = Math.round(boost * 100) / 100;
-    }
-    const newData: Partial<typeof store.liveData> = {
-      rpm: newRpm, speed: Math.round(newRpm * 0.015 + Math.random() * 5),
-      coolantTemp: Math.min(110, 90 + loadPercent * 0.2 + Math.random() * 2),
-      oilTemp: Math.min(140, 95 + loadPercent * 0.4 + Math.random() * 3),
-      oilPressure: Math.max(1.5, 3.5 - newRpm * 0.0002 + Math.random() * 0.3),
-      boost, iat: Math.min(70, 35 + loadPercent * 0.3 + (boost > 0 ? boost * 10 : 0)),
-      afr: engine.fuelType === 'diesel' ? Math.round((1.2 + Math.random() * 0.2) * 100) / 100 : Math.round((loadPercent > 70 ? 0.82 + Math.random() * 0.05 : 1.0 + Math.random() * 0.05) * 100) / 100,
-      throttle: Math.round(loadPercent * 0.9 + Math.random() * 5), load: loadPercent,
-      timing: Math.round((engine.fuelType === 'diesel' ? 8 : 15 + (newRpm > 4000 ? 5 : 0) - (boost > 0.5 ? boost * 3 : 0) + Math.random() * 2) * 10) / 10,
-      fuelPressure: Math.round((5 + boost * 0.5 + Math.random() * 0.2) * 10) / 10,
-      battery: Math.round((14 + Math.random() * 0.4) * 10) / 10,
-      knock: boost > 1.0 && Math.random() > 0.9 ? Math.round(Math.random() * 3) : 0,
-      lambda: Math.round((1.0 + Math.random() * 0.1 - (loadPercent > 80 ? 0.15 : 0)) * 100) / 100,
-      mapPressure: Math.round((0.95 + (boost > 0 ? boost * 0.1 : 0)) * 100) / 100,
-      maf: Math.round(15 + loadPercent * 0.8 + Math.random() * 3),
-      fuelTrimShort: Math.round((Math.random() * 6 - 3) * 10) / 10,
-      fuelTrimLong: Math.round((2 + Math.random() * 2) * 10) / 10,
-      dutyCycle: Math.round(Math.min(95, loadPercent * 0.6 + (boost > 0 ? boost * 20 : 0) + Math.random() * 3)),
-      tqActual: Math.round(engine.stockTorque * (loadPercent / 100) * 1.2 + Math.random() * 20),
-      tqRequested: Math.round(engine.stockTorque * (loadPercent / 100)),
-      turbineInlet: engine.stockBoost ? Math.round(650 + boost * 150 + Math.random() * 30) : 0,
-      turbineOutlet: engine.stockBoost ? Math.round(480 + boost * 100 + Math.random() * 20) : 0,
-    };
-    store.updateLiveData(newData);
-    // Update OBD2 state if connected
-    if (obd2.connectionState === 'connected') {
-      store.setObd2({ rpm: newRpm, vehicleSpeed: newData.speed || 0, batteryVoltage: newData.battery || 14.2, lastActivity: Date.now() });
-    }
-    if (isLogging && currentSession) store.addLogEntry(newData);
-  }, 500);
-}
-export function stopLiveDataSimulation() {
-  if (simInterval) { clearInterval(simInterval); simInterval = null; }
-}
