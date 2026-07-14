@@ -16,6 +16,6 @@ public class ScreenManager extends Session {
     @Override
     public Screen onCreateScreen(@NonNull Intent intent) {
         // Start with the home screen
-        return new HomeScreen(this);
+        return new HomeScreen(getCarContext());
     }
 }
