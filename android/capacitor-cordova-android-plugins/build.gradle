@@ -9,7 +9,8 @@ buildscript {
         mavenCentral()
     }
     dependencies {
-        classpath 'com.android.tools.build:gradle:8.7.2'
+        // Keep AGP in sync with root project and @capacitor/android (8.2.1)
+        classpath 'com.android.tools.build:gradle:8.2.1'
     }
 }
 
