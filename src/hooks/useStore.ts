@@ -10,57 +10,37 @@ import type {
 } from '@/types';
 import type { OBD2State, FlashSession, CableInfo } from '@/lib/obd2Connection';
 import { aiTuningEngine } from '@/lib/aiTuningEngine';
-import { ENGINE_SPECS } from '@/lib/engineData';
 
 interface AppState {
-  // Connection
   connection: ConnectionStatus;
   setConnection: (c: Partial<ConnectionStatus>) => void;
-
-  // OBD2 Connection
   obd2: OBD2State;
   setObd2: (o: Partial<OBD2State>) => void;
   obd2Cable: CableInfo | null;
   setObd2Cable: (c: CableInfo | null) => void;
-
-  // Flash Session
   flashSession: FlashSession | null;
   setFlashSession: (f: FlashSession | null) => void;
-
-  // Vehicle Profile
   profile: VehicleProfile;
   updateProfile: (p: Partial<VehicleProfile>) => void;
-
-  // Current Map
   currentMap: PerformanceMap | null;
   setCurrentMap: (m: PerformanceMap) => void;
   generateMap: (mapType: MapType) => void;
-
-  // Live Data
   liveData: LiveData;
   updateLiveData: (d: Partial<LiveData>) => void;
   isLogging: boolean;
   setIsLogging: (v: boolean) => void;
-
-  // Logs
   logSessions: LogSession[];
   currentSession: LogSession | null;
   startSession: (name: string) => void;
   stopSession: () => void;
   addLogEntry: (data: Partial<LiveData>, event?: string, severity?: 'info' | 'warning' | 'danger') => void;
-
-  // AI Recommendations
   aiRecommendations: AiTuneRecommendation[];
   setAiRecommendations: (r: AiTuneRecommendation[]) => void;
   refreshAiAnalysis: () => void;
   applyRecommendation: (id: string) => void;
-
-  // Gauges
   gaugeLayouts: GaugeLayout[];
   activeGaugeLayout: string;
   setActiveGaugeLayout: (id: string) => void;
-
-  // UI
   activeScreen: string;
   setActiveScreen: (s: string) => void;
   isAiTuning: boolean;
@@ -75,76 +55,31 @@ interface AppState {
 }
 
 const defaultProfile: VehicleProfile = {
-  id: 'default',
-  name: 'My E60',
-  vin: '', // Empty until read from actual DME
-  engine: 'n54',
-  transmission: 'auto_6',
-  injector: 'stock',
-  hasUpgradedIntercooler: false,
-  hasUpgradedTurbo: false,
-  hasUpgradedFuelPump: false,
-  hasUpgradedClutch: false,
-  hasMethInjection: false,
-  hasDownpipes: false,
-  hasExhaust: false,
-  hasUpgradedChargepipe: false,
-  currentMap: 'stock',
-  mileage: 0, // Will be read from ECU
-  notes: '',
+  id: 'default', name: 'My E60', vin: '', engine: 'n54', transmission: 'auto_6',
+  injector: 'stock', hasUpgradedIntercooler: false, hasUpgradedTurbo: false,
+  hasUpgradedFuelPump: false, hasUpgradedClutch: false, hasMethInjection: false,
+  hasDownpipes: false, hasExhaust: false, hasUpgradedChargepipe: false,
+  currentMap: 'stock', mileage: 0, notes: '',
 };
 
-// Live data starts at zero - will be populated from real OBD2 reads
 const defaultLiveData: LiveData = {
-  rpm: 0,
-  speed: 0,
-  coolantTemp: 0,
-  oilTemp: 0,
-  oilPressure: 0,
-  boost: 0,
-  iat: 0,
-  afr: 0,
-  throttle: 0,
-  load: 0,
-  timing: 0,
-  fuelPressure: 0,
-  battery: 12.6,
-  knock: 0,
-  lambda: 0,
-  mapPressure: 0,
-  maf: 0,
-  fuelTrimShort: 0,
-  fuelTrimLong: 0,
-  dutyCycle: 0,
-  tqActual: 0,
-  tqRequested: 0,
-  turbineInlet: 0,
-  turbineOutlet: 0,
-  timestamp: 0,
+  rpm: 0, speed: 0, coolantTemp: 0, oilTemp: 0, oilPressure: 0, boost: 0,
+  iat: 0, afr: 0, throttle: 0, load: 0, timing: 0, fuelPressure: 0,
+  battery: 12.6, knock: 0, lambda: 0, mapPressure: 0, maf: 0,
+  fuelTrimShort: 0, fuelTrimLong: 0, dutyCycle: 0, tqActual: 0,
+  tqRequested: 0, turbineInlet: 0, turbineOutlet: 0, timestamp: 0,
 };
 
 const defaultObd2: OBD2State = {
-  connectionState: 'disconnected',
-  cable: null,
-  protocol: 'none',
-  ecus: [],
-  batteryVoltage: 12.6,
-  ignitionState: 'off',
-  engineRunning: false,
-  vehicleSpeed: 0,
-  rpm: 0,
-  diagnostics: null,
-  lastError: null,
-  lastActivity: 0,
-  autoConnect: true,
-  dmeProtocolVersion: '',
+  connectionState: 'disconnected', cable: null, protocol: 'none', ecus: [],
+  batteryVoltage: 12.6, ignitionState: 'off', engineRunning: false,
+  vehicleSpeed: 0, rpm: 0, diagnostics: null, lastError: null,
+  lastActivity: 0, autoConnect: true, dmeProtocolVersion: '',
 };
 
 const defaultGaugeLayouts: GaugeLayout[] = [
   {
-    id: 'default',
-    name: 'Default',
-    isDefault: true,
+    id: 'default', name: 'Default', isDefault: true,
     gauges: [
       { id: 'rpm', type: 'rpm', position: { x: 0, y: 0, w: 4, h: 4 }, min: 0, max: 8000, warningThreshold: 6500, dangerThreshold: 7200, unit: 'RPM', label: 'RPM' },
       { id: 'boost', type: 'boost', position: { x: 4, y: 0, w: 4, h: 4 }, min: -1, max: 2.5, warningThreshold: 1.8, dangerThreshold: 2.2, unit: 'bar', label: 'Boost' },
@@ -156,9 +91,7 @@ const defaultGaugeLayouts: GaugeLayout[] = [
     ],
   },
   {
-    id: 'performance',
-    name: 'Performance',
-    isDefault: false,
+    id: 'performance', name: 'Performance', isDefault: false,
     gauges: [
       { id: 'rpm', type: 'rpm', position: { x: 0, y: 0, w: 6, h: 6 }, min: 0, max: 8000, warningThreshold: 6500, dangerThreshold: 7200, unit: 'RPM', label: 'RPM' },
       { id: 'boost', type: 'boost', position: { x: 6, y: 0, w: 6, h: 6 }, min: -1, max: 2.5, warningThreshold: 1.8, dangerThreshold: 2.2, unit: 'bar', label: 'Boost' },
@@ -168,9 +101,7 @@ const defaultGaugeLayouts: GaugeLayout[] = [
     ],
   },
   {
-    id: 'turbo',
-    name: 'Turbo Monitor',
-    isDefault: false,
+    id: 'turbo', name: 'Turbo Monitor', isDefault: false,
     gauges: [
       { id: 'boost', type: 'boost', position: { x: 0, y: 0, w: 6, h: 6 }, min: -1, max: 2.5, warningThreshold: 1.8, dangerThreshold: 2.2, unit: 'bar', label: 'Boost' },
       { id: 'turbine_in', type: 'turbine_inlet', position: { x: 6, y: 0, w: 3, h: 3 }, min: 400, max: 1000, warningThreshold: 850, dangerThreshold: 950, unit: '°C', label: 'Turbine In' },
@@ -184,31 +115,18 @@ const defaultGaugeLayouts: GaugeLayout[] = [
 ];
 
 export const useStore = create<AppState>((set, get) => ({
-  // Connection - starts disconnected, no fake connected state
   connection: {
-    connected: false,
-    protocol: 'none',
-    ecuConnected: false,
-    batteryVoltage: 12.6,
-    vehicleDetected: false,
-    dmeDetected: false,
-    egsDetected: false,
-    dscDetected: false,
-    kombiDetected: false,
+    connected: false, protocol: 'none', ecuConnected: false, batteryVoltage: 12.6,
+    vehicleDetected: false, dmeDetected: false, egsDetected: false,
+    dscDetected: false, kombiDetected: false,
   },
   setConnection: (c) => set((s) => ({ connection: { ...s.connection, ...c } })),
-
-  // OBD2
   obd2: defaultObd2,
   setObd2: (o) => set((s) => ({ obd2: { ...s.obd2, ...o } })),
   obd2Cable: null,
   setObd2Cable: (c) => set({ obd2Cable: c }),
-
-  // Flash Session
   flashSession: null,
   setFlashSession: (f) => set({ flashSession: f }),
-
-  // Profile
   profile: defaultProfile,
   updateProfile: (p) => set((s) => {
     const newProfile = { ...s.profile, ...p };
@@ -218,8 +136,6 @@ export const useStore = create<AppState>((set, get) => ({
     }
     return { profile: newProfile };
   }),
-
-  // Current Map
   currentMap: null,
   setCurrentMap: (m) => set({ currentMap: m }),
   generateMap: (mapType) => {
@@ -227,31 +143,17 @@ export const useStore = create<AppState>((set, get) => ({
     const map = aiTuningEngine.generateMap(profile.engine, mapType, profile.injector, profile);
     set({ currentMap: map, profile: { ...profile, currentMap: mapType } });
   },
-
-  // Live Data - starts at zero, populated from real OBD2
   liveData: defaultLiveData,
   updateLiveData: (d) => set((s) => ({ liveData: { ...s.liveData, ...d, timestamp: Date.now() } })),
   isLogging: false,
-  setIsLogging: (v) => set({ isLogging: v }),
-
-  // Logs
+  setIsLogging: (v) => set({ isAiTuning: v }),
   logSessions: [],
   currentSession: null,
   startSession: (name) => {
     set({ currentSession: {
-      id: `session_${Date.now()}`,
-      name,
-      startTime: Date.now(),
-      entries: [],
-      engineType: get().profile.engine,
-      mapType: get().profile.currentMap,
-      maxRpm: 0,
-      maxBoost: 0,
-      maxSpeed: 0,
-      maxIat: 0,
-      knockEvents: 0,
-      avgAfr: 1.0,
-      aiRecommendations: [],
+      id: `session_${Date.now()}`, name, startTime: Date.now(), entries: [],
+      engineType: get().profile.engine, mapType: get().profile.currentMap,
+      maxRpm: 0, maxBoost: 0, maxSpeed: 0, maxIat: 0, knockEvents: 0, avgAfr: 1.0, aiRecommendations: [],
     }, isLogging: true });
   },
   stopSession: () => {
@@ -274,8 +176,6 @@ export const useStore = create<AppState>((set, get) => ({
       knockEvents: currentSession.knockEvents + (data.knock && data.knock > 0 ? 1 : 0),
     }});
   },
-
-  // AI
   aiRecommendations: [],
   setAiRecommendations: (r) => set({ aiRecommendations: r }),
   refreshAiAnalysis: () => {
@@ -293,13 +193,9 @@ export const useStore = create<AppState>((set, get) => ({
     }
     set({ currentMap: updatedMap, aiRecommendations: aiRecommendations.filter(r => r.id !== id) });
   },
-
-  // Gauges
   gaugeLayouts: defaultGaugeLayouts,
   activeGaugeLayout: 'default',
   setActiveGaugeLayout: (id) => set({ activeGaugeLayout: id }),
-
-  // UI
   activeScreen: 'home',
   setActiveScreen: (s) => set({ activeScreen: s }),
   isAiTuning: false,
