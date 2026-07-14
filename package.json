@@ -6,7 +6,19 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "type-check": "tsc --noEmit",
+    "clean": "rm -rf node_modules dist build www .vite .tsc-output && find . -name '*.cache' -delete 2>/dev/null || true",
+    "clean:android": "cd android && ./gradlew clean && find . -name 'build' -type d -exec rm -rf {} + 2>/dev/null || true && find . -name '.gradle' -type d -exec rm -rf {} + 2>/dev/null || true && cd ..",
+    "clean:all": "npm run clean && npm run clean:android",
+    "reinstall": "npm run clean && npm install",
+    "cap:sync": "npx cap sync",
+    "cap:build-android": "cd android && ./gradlew assembleRelease && cd ..",
+    "android:build": "npm run type-check && npm run build && npm run cap:sync && npm run cap:build-android",
+    "build:all": "npm run clean:all && npm install && npm run type-check && npm run build && npm run cap:sync",
+    "android:install": "adb install -r android/app/build/outputs/apk/release/app-release.apk",
+    "android:logs": "adb logcat | grep -i 'bmwe60'",
+    "android:check": "npx cap doctor"
   },
   "dependencies": {
     "@capacitor/android": "^5.7.0",
