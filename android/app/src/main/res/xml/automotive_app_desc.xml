@@ -1,4 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
 <automotiveApp>
+    <!-- Enable web view template for custom UI -->
     <uses name="template" />
+    <!-- Enable notifications -->
     <uses name="notification" />
+    <!-- Enable long message template for diagnostics display -->
+    <uses name="long_message_template" />
+    <!-- Enable pane template for multi-screen navigation -->
+    <uses name="pane_template" />
 </automotiveApp>
