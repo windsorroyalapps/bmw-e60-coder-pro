@@ -4,8 +4,6 @@
 
 import { OBD2Bridge } from './nativeBridge';
 import type {
-  CableInfo as NativeCableInfo,
-  ECUInfo as NativeECUInfo,
   ConnectionDiagnostics,
   FlashProgressEvent,
 } from './nativeBridge';
@@ -127,15 +125,10 @@ export class OBD2ConnectionManager {
     return { ...this.state };
   }
 
-  /**
-   * Detect connected K+DCAN cable via native USB scan.
-   */
   async detectCable(): Promise<CableInfo | null> {
     this.updateState({ connectionState: 'searching', lastError: null });
-
     try {
       const result = await OBD2Bridge.detectCable();
-
       if (result.found && result.cable) {
         const cable: CableInfo = {
           type: result.cable.type as CableType,
@@ -165,21 +158,14 @@ export class OBD2ConnectionManager {
     }
   }
 
-  /**
-   * Connect to vehicle via detected cable.
-   * Real OBD2 handshaking through native bridge.
-   */
   async connect(): Promise<boolean> {
     if (!this.state.cable) {
       const cable = await this.detectCable();
       if (!cable) return false;
     }
-
     this.updateState({ connectionState: 'connecting' });
-
     try {
       const result = await OBD2Bridge.connect();
-
       if (result.success) {
         const ecus: ECUInfo[] = (result.ecus || []).map(e => ({
           name: e.name,
@@ -190,7 +176,6 @@ export class OBD2ConnectionManager {
           lastResponse: e.lastResponse,
           faultCodes: e.faultCodes,
         }));
-
         this.updateState({
           connectionState: 'connected',
           protocol: (result.protocol || 'k_dcan') as ProtocolType,
@@ -220,9 +205,6 @@ export class OBD2ConnectionManager {
     }
   }
 
-  /**
-   * Disconnect from vehicle.
-   */
   disconnect(): void {
     OBD2Bridge.disconnect().catch(() => {});
     this.updateState({
@@ -242,9 +224,6 @@ export class OBD2ConnectionManager {
     this.removeFlashListeners();
   }
 
-  /**
-   * Read live data from vehicle ECU.
-   */
   async readLiveData(): Promise<Record<string, number> | null> {
     try {
       const result = await OBD2Bridge.readLiveData();
@@ -264,9 +243,6 @@ export class OBD2ConnectionManager {
     }
   }
 
-  /**
-   * Read a single PID.
-   */
   async readPID(pid: string): Promise<number | null> {
     try {
       const result = await OBD2Bridge.readPID({ pid });
@@ -276,15 +252,12 @@ export class OBD2ConnectionManager {
     }
   }
 
-  /**
-   * Read DME info from actual ECU.
-   */
   async readDMEInfo(): Promise<{ ecuType: string; software: string; vin: string; powerClass: string } | null> {
     try {
       const result = await OBD2Bridge.readDMEInfo();
       if (result.success) {
         return {
-          ecuType: result.ecuType,
+          ecType: result.ecuType,
           software: result.software,
           vin: result.vin,
           powerClass: result.powerClass,
@@ -296,9 +269,6 @@ export class OBD2ConnectionManager {
     }
   }
 
-  /**
-   * Write a DME parameter (for AI tuning).
-   */
   async writeDMEParameter(parameter: string, value: number): Promise<boolean> {
     try {
       const result = await OBD2Bridge.writeDMEParameter({ parameter, value });
@@ -308,21 +278,15 @@ export class OBD2ConnectionManager {
     }
   }
 
-  /**
-   * Start a flash session.
-   */
   async startFlash(isLiveFlash: boolean = false): Promise<{ success: boolean; message: string; session?: FlashSession }> {
     if (this.state.connectionState !== 'connected') {
       return { success: false, message: 'Not connected to vehicle' };
     }
-
     if (this.state.batteryVoltage < 13.0) {
       return { success: false, message: `Battery voltage too low: ${this.state.batteryVoltage.toFixed(1)}V (need 13.0V+)` };
     }
-
     try {
       const result = await OBD2Bridge.startFlash({ isLiveFlash });
-
       if (result.success && result.session) {
         const session: FlashSession = {
           id: result.session.id,
@@ -346,16 +310,12 @@ export class OBD2ConnectionManager {
         this.setupFlashListeners();
         return { success: true, message: result.message, session };
       }
-
       return { success: false, message: result.message };
     } catch (e: any) {
       return { success: false, message: 'Flash start failed: ' + (e?.message || String(e)) };
     }
   }
 
-  /**
-   * Execute flash with real progress from native layer.
-   */
   async executeFlash(): Promise<void> {
     if (!this.flashSession) return;
     try {
@@ -369,9 +329,6 @@ export class OBD2ConnectionManager {
     }
   }
 
-  /**
-   * Quick flash calibration data.
-   */
   async quickFlash(): Promise<{ success: boolean; message: string }> {
     if (this.state.connectionState !== 'connected') {
       return { success: false, message: 'Not connected' };
@@ -384,9 +341,6 @@ export class OBD2ConnectionManager {
     }
   }
 
-  /**
-   * Abort current flash.
-   */
   abortFlash(): void {
     OBD2Bridge.abortFlash().catch(() => {});
     if (this.flashSession) {
@@ -396,9 +350,6 @@ export class OBD2ConnectionManager {
     }
   }
 
-  /**
-   * Send CAN commands (for gamepad control).
-   */
   async sendCANCommands(commands: import('./nativeBridge').CANCommand[]): Promise<boolean> {
     try {
       const result = await OBD2Bridge.sendCANCommands({ commands });
@@ -410,7 +361,6 @@ export class OBD2ConnectionManager {
 
   private setupFlashListeners() {
     this.removeFlashListeners();
-
     OBD2Bridge.addListener('flashProgress', (data: FlashProgressEvent) => {
       if (!this.flashSession) return;
       this.flashSession.progress = data.progress;
@@ -422,7 +372,6 @@ export class OBD2ConnectionManager {
       this.flashSession.status = 'flashing';
       this.emitFlash();
     }).then(l => { this.flashProgressListener = l; });
-
     OBD2Bridge.addListener('flashComplete', () => {
       if (!this.flashSession) return;
       this.flashSession.status = 'complete';
@@ -432,7 +381,6 @@ export class OBD2ConnectionManager {
       this.emitFlash();
       this.removeFlashListeners();
     }).then(l => { this.flashCompleteListener = l; });
-
     OBD2Bridge.addListener('flashError', (data: { status: string; error: string }) => {
       if (!this.flashSession) return;
       this.flashSession.status = 'error';
