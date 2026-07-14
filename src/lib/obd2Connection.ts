@@ -257,7 +257,7 @@ export class OBD2ConnectionManager {
       const result = await OBD2Bridge.readDMEInfo();
       if (result.success) {
         return {
-          ecType: result.ecuType,
+          ecuType: result.ecuType,
           software: result.software,
           vin: result.vin,
           powerClass: result.powerClass,
