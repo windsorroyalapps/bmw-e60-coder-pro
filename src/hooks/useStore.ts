@@ -6,7 +6,7 @@ import { create } from 'zustand';
 import type {
   MapType, LiveData, LogSession,
   PerformanceMap, VehicleProfile, AiTuneRecommendation, ConnectionStatus,
-  GaugeLayout
+  GaugeLayout, FlashBackup, DTCReading
 } from '@/types';
 import type { OBD2State, FlashSession, CableInfo } from '@/lib/obd2Connection';
 import { aiTuningEngine } from '@/lib/aiTuningEngine';
@@ -20,6 +20,11 @@ interface AppState {
   setObd2Cable: (c: CableInfo | null) => void;
   flashSession: FlashSession | null;
   setFlashSession: (f: FlashSession | null) => void;
+  flashBackups: FlashBackup[];
+  addFlashBackup: (b: FlashBackup) => void;
+  removeFlashBackup: (id: string) => void;
+  dtcReadings: DTCReading[];
+  setDtcReadings: (r: DTCReading[]) => void;
   profile: VehicleProfile;
   updateProfile: (p: Partial<VehicleProfile>) => void;
   currentMap: PerformanceMap | null;
@@ -129,6 +134,11 @@ export const useStore = create<AppState>((set, get) => ({
   setObd2Cable: (c) => set({ obd2Cable: c }),
   flashSession: null,
   setFlashSession: (f) => set({ flashSession: f }),
+  flashBackups: [],
+  addFlashBackup: (b) => set((s) => ({ flashBackups: [b, ...s.flashBackups].slice(0, 5) })),
+  removeFlashBackup: (id) => set((s) => ({ flashBackups: s.flashBackups.filter(b => b.id !== id) })),
+  dtcReadings: [],
+  setDtcReadings: (r) => set({ dtcReadings: r }),
   profile: defaultProfile,
   updateProfile: (p) => set((s) => {
     const newProfile = { ...s.profile, ...p };
