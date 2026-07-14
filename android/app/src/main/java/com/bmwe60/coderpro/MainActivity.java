@@ -4,6 +4,7 @@ import com.getcapacitor.BridgeActivity;
 import com.bmwe60.coderpro.plugin.OBD2BridgePlugin;
 import android.os.Bundle;
 import android.view.WindowManager;
+import android.content.pm.ActivityInfo;
 
 /**
  * BMW E60 Coder Pro - Android Auto Mobile Projection App
@@ -22,6 +23,15 @@ public class MainActivity extends BridgeActivity {
         
         // Keep screen on during flash operations
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        
+        // Force landscape orientation for best headunit display
+        setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
+        
+        // Enable hardware acceleration for smooth UI rendering
+        getWindow().setFlags(
+            WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
+            WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED
+        );
     }
     
     @Override

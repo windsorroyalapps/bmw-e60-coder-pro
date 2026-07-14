@@ -11,6 +11,7 @@ import { AiAnalysisPage } from '@/pages/AiAnalysisPage';
 import { LogsPage } from '@/pages/LogsPage';
 import { SettingsPage } from '@/pages/SettingsPage';
 import { GamepadPage } from '@/pages/GamepadPage';
+import { useAndroidAutoProjection } from '@/hooks/useAndroidAutoProjection';
 import {
   Home, Gauge, Zap, Brain, FileText, Settings, Shuffle, Gamepad2
 } from 'lucide-react';
@@ -29,6 +30,9 @@ const NAV_ITEMS = [
 function App() {
   const { activeScreen, setActiveScreen, setShowQuickSwitch, obd2, updateLiveData, isLogging, currentSession, addLogEntry } = useStore();
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Enable Android Auto projection
+  useAndroidAutoProjection();
 
   // Real OBD2 live data polling - reads from actual vehicle ECU
   useEffect(() => {
