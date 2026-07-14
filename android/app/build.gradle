@@ -39,7 +39,7 @@ dependencies {
     implementation project(':capacitor-android')
     
     // USB Serial for K+DCAN OBD2 communication
-    implementation 'com.github.felHR85:UsbSerial:6.1.0'
+    implementation 'com.github.felhr85:UsbSerial:6.1.0'
     
     testImplementation "junit:junit:$junitVersion"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
