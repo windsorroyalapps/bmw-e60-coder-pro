@@ -1,0 +1,49 @@
+// BMW E60 Coder Pro - Android Auto Car App Module
+// Isolated module to prevent androidx.car.app from breaking main APK build.
+// This module is conditionally included by the main app.
+
+apply plugin: 'com.android.library'
+
+android {
+    namespace "com.bmwe60.coderpro.car"
+    compileSdk rootProject.ext.compileSdkVersion
+
+    defaultConfig {
+        minSdkVersion rootProject.ext.minSdkVersion
+        targetSdkVersion rootProject.ext.targetSdkVersion
+        versionCode 1
+        versionName "1.0"
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+repositories {
+    google()
+    mavenCentral()
+}
+
+dependencies {
+    implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
+    implementation "androidx.core:core:$androidxCoreVersion"
+
+    // Android Auto App Library - isolated in this module to prevent
+    // silent Gradle failures in the main app build.
+    // NOTE: This dependency requires minSdk 23+ and Google Play Services.
+    implementation "androidx.car.app:app:1.4.0-rc02"
+    implementation "androidx.car.app:app-projected:1.4.0-rc02"
+    implementation "androidx.lifecycle:lifecycle-common:2.6.2"
+
+    // Capacitor bridge for communicating with the web layer
+    implementation project(':capacitor-android')
+}
