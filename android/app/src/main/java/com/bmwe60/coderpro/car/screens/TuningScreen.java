@@ -6,6 +6,7 @@ import androidx.car.app.Screen;
 import androidx.car.app.model.Action;
 import androidx.car.app.model.Template;
 import androidx.car.app.model.PaneTemplate;
+import androidx.car.app.model.Pane;
 import androidx.car.app.model.Row;
 
 /**
@@ -20,9 +21,7 @@ public class TuningScreen extends Screen {
     @NonNull
     @Override
     public Template onGetTemplate() {
-        return new PaneTemplate.Builder()
-                .setTitle("AI Tuning")
-                .setHeaderAction(Action.BACK)
+        Pane pane = new Pane.Builder()
                 .addRow(new Row.Builder()
                         .setTitle("Current Map")
                         .addText("Stock")
@@ -35,6 +34,12 @@ public class TuningScreen extends Screen {
                         .setTitle("Power")
                         .addText("306 hp")
                         .build())
+                .build();
+
+        return new PaneTemplate.Builder()
+                .setTitle("AI Tuning")
+                .setHeaderAction(Action.BACK)
+                .setSinglePane(pane)
                 .build();
     }
 }

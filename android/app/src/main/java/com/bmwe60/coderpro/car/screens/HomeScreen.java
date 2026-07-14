@@ -7,7 +7,8 @@ import androidx.car.app.model.Action;
 import androidx.car.app.model.CarIcon;
 import androidx.car.app.model.Template;
 import androidx.car.app.model.GridTemplate;
-import androidx.car.app.model.Row;
+import androidx.car.app.model.ItemList;
+import androidx.car.app.model.GridItem;
 import androidx.core.graphics.drawable.IconCompat;
 import com.bmwe60.coderpro.R;
 
@@ -24,49 +25,52 @@ public class HomeScreen extends Screen {
     @NonNull
     @Override
     public Template onGetTemplate() {
+        ItemList.Builder listBuilder = new ItemList.Builder();
+
+        listBuilder.addItem(
+            new GridItem.Builder()
+                .setTitle("Connect")
+                .setImage(new CarIcon.Builder(
+                    IconCompat.createWithResource(getCarContext(), R.drawable.ic_launcher_foreground)
+                ).build())
+                .setOnClickListener(() -> getScreenManager().push(new ConnectionScreen(getCarContext())))
+                .build()
+        );
+
+        listBuilder.addItem(
+            new GridItem.Builder()
+                .setTitle("Gauges")
+                .setImage(new CarIcon.Builder(
+                    IconCompat.createWithResource(getCarContext(), R.drawable.ic_launcher_foreground)
+                ).build())
+                .setOnClickListener(() -> getScreenManager().push(new GaugesScreen(getCarContext())))
+                .build()
+        );
+
+        listBuilder.addItem(
+            new GridItem.Builder()
+                .setTitle("Tuning")
+                .setImage(new CarIcon.Builder(
+                    IconCompat.createWithResource(getCarContext(), R.drawable.ic_launcher_foreground)
+                ).build())
+                .setOnClickListener(() -> getScreenManager().push(new TuningScreen(getCarContext())))
+                .build()
+        );
+
+        listBuilder.addItem(
+            new GridItem.Builder()
+                .setTitle("Flash")
+                .setImage(new CarIcon.Builder(
+                    IconCompat.createWithResource(getCarContext(), R.drawable.ic_launcher_foreground)
+                ).build())
+                .setOnClickListener(() -> getScreenManager().push(new FlashScreen(getCarContext())))
+                .build()
+        );
+
         return new GridTemplate.Builder()
                 .setTitle("BMW E60 Coder Pro")
                 .setHeaderAction(Action.APP_ICON)
-                .addList(
-                        new GridTemplate.GridItemList.Builder()
-                                .addItem(
-                                        new GridTemplate.GridItem.Builder()
-                                                .setTitle("Connect")
-                                                .setImage(new CarIcon.Builder(
-                                                        IconCompat.createWithResource(getCarContext(), R.drawable.ic_launcher_foreground)
-                                                ).build())
-                                                .setOnClickListener(() -> getScreenManager().push(new ConnectionScreen(getCarContext())))
-                                                .build()
-                                )
-                                .addItem(
-                                        new GridTemplate.GridItem.Builder()
-                                                .setTitle("Gauges")
-                                                .setImage(new CarIcon.Builder(
-                                                        IconCompat.createWithResource(getCarContext(), R.drawable.ic_launcher_foreground)
-                                                ).build())
-                                                .setOnClickListener(() -> getScreenManager().push(new GaugesScreen(getCarContext())))
-                                                .build()
-                                )
-                                .addItem(
-                                        new GridTemplate.GridItem.Builder()
-                                                .setTitle("Tuning")
-                                                .setImage(new CarIcon.Builder(
-                                                        IconCompat.createWithResource(getCarContext(), R.drawable.ic_launcher_foreground)
-                                                ).build())
-                                                .setOnClickListener(() -> getScreenManager().push(new TuningScreen(getCarContext())))
-                                                .build()
-                                )
-                                .addItem(
-                                        new GridTemplate.GridItem.Builder()
-                                                .setTitle("Flash")
-                                                .setImage(new CarIcon.Builder(
-                                                        IconCompat.createWithResource(getCarContext(), R.drawable.ic_launcher_foreground)
-                                                ).build())
-                                                .setOnClickListener(() -> getScreenManager().push(new FlashScreen(getCarContext())))
-                                                .build()
-                                )
-                                .build()
-                )
+                .setSingleList(listBuilder.build())
                 .build();
     }
 }

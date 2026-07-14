@@ -6,6 +6,7 @@ import androidx.car.app.Screen;
 import androidx.car.app.model.Action;
 import androidx.car.app.model.Template;
 import androidx.car.app.model.PaneTemplate;
+import androidx.car.app.model.Pane;
 import androidx.car.app.model.Row;
 
 /**
@@ -20,9 +21,7 @@ public class GaugesScreen extends Screen {
     @NonNull
     @Override
     public Template onGetTemplate() {
-        return new PaneTemplate.Builder()
-                .setTitle("Live Gauges")
-                .setHeaderAction(Action.BACK)
+        Pane pane = new Pane.Builder()
                 .addRow(new Row.Builder()
                         .setTitle("RPM")
                         .addText("0")
@@ -35,6 +34,12 @@ public class GaugesScreen extends Screen {
                         .setTitle("Boost")
                         .addText("0.0 bar")
                         .build())
+                .build();
+
+        return new PaneTemplate.Builder()
+                .setTitle("Live Gauges")
+                .setHeaderAction(Action.BACK)
+                .setSinglePane(pane)
                 .build();
     }
 }

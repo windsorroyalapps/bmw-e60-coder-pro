@@ -6,6 +6,7 @@ import androidx.car.app.Screen;
 import androidx.car.app.model.Action;
 import androidx.car.app.model.Template;
 import androidx.car.app.model.PaneTemplate;
+import androidx.car.app.model.Pane;
 import androidx.car.app.model.Row;
 
 /**
@@ -20,9 +21,7 @@ public class FlashScreen extends Screen {
     @NonNull
     @Override
     public Template onGetTemplate() {
-        return new PaneTemplate.Builder()
-                .setTitle("DME Flash")
-                .setHeaderAction(Action.BACK)
+        Pane pane = new Pane.Builder()
                 .addRow(new Row.Builder()
                         .setTitle("Flash Mode")
                         .addText("Ready")
@@ -35,6 +34,12 @@ public class FlashScreen extends Screen {
                         .setTitle("Battery Voltage")
                         .addText("14.2V")
                         .build())
+                .build();
+
+        return new PaneTemplate.Builder()
+                .setTitle("DME Flash")
+                .setHeaderAction(Action.BACK)
+                .setSinglePane(pane)
                 .build();
     }
 }

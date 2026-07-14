@@ -6,6 +6,7 @@ import androidx.car.app.Screen;
 import androidx.car.app.model.Action;
 import androidx.car.app.model.Template;
 import androidx.car.app.model.PaneTemplate;
+import androidx.car.app.model.Pane;
 import androidx.car.app.model.Row;
 
 /**
@@ -20,9 +21,7 @@ public class ConnectionScreen extends Screen {
     @NonNull
     @Override
     public Template onGetTemplate() {
-        return new PaneTemplate.Builder()
-                .setTitle("OBD2 Connection")
-                .setHeaderAction(Action.BACK)
+        Pane pane = new Pane.Builder()
                 .addRow(new Row.Builder()
                         .setTitle("Status")
                         .addText("Connecting...")
@@ -31,6 +30,12 @@ public class ConnectionScreen extends Screen {
                         .setTitle("Vehicle")
                         .addText("BMW E60")
                         .build())
+                .build();
+
+        return new PaneTemplate.Builder()
+                .setTitle("OBD2 Connection")
+                .setHeaderAction(Action.BACK)
+                .setSinglePane(pane)
                 .build();
     }
 }
