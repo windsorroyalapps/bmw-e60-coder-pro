@@ -40,6 +40,9 @@ dependencies {
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
     implementation project(':capacitor-android')
 
+    // Android Auto / Automotive OS car app library (stable 1.2.0)
+    implementation "androidx.car.app:app:1.2.0"
+
     // USB Serial for K+DCAN OBD2 communication
     implementation 'com.github.felhr85:UsbSerial:6.1.0'
 
