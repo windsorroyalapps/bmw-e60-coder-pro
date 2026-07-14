@@ -359,6 +359,88 @@ export class OBD2ConnectionManager {
     }
   }
 
+  // ==================== FLASH BACKUP / RESTORE ====================
+
+  async backupDME(): Promise<{ success: boolean; backup?: import('@/types').FlashBackup; error?: string }> {
+    if (this.state.connectionState !== 'connected') {
+      return { success: false, error: 'Not connected to vehicle' };
+    }
+    try {
+      const result = await OBD2Bridge.backupDME();
+      return {
+        success: result.success,
+        backup: result.backup ? {
+          id: result.backup.id,
+          createdAt: result.backup.createdAt,
+          vin: result.backup.vin,
+          ecuType: result.backup.ecuType,
+          softwareVersion: result.backup.softwareVersion,
+          engineType: result.backup.engineType as any,
+          mapType: result.backup.mapType as any,
+          batteryVoltage: result.backup.batteryVoltage,
+          sectors: (result.backup.sectors || []).map((s: any) => ({
+            name: s.name,
+            startAddress: s.startAddress,
+            size: s.size,
+            checksum: s.checksum,
+            backedUp: s.backedUp,
+          })),
+          totalBytes: result.backup.totalBytes,
+          status: result.backup.status as any,
+          progress: result.backup.progress,
+        } : undefined,
+        error: result.error,
+      };
+    } catch (e: any) {
+      return { success: false, error: 'Backup failed: ' + (e?.message || String(e)) };
+    }
+  }
+
+  async restoreDME(backupId: string): Promise<{ success: boolean; sectorsRestored: number; sectorsTotal: number; error?: string }> {
+    if (this.state.connectionState !== 'connected') {
+      return { success: false, sectorsRestored: 0, sectorsTotal: 0, error: 'Not connected to vehicle' };
+    }
+    try {
+      const result = await OBD2Bridge.restoreDME({ backupId });
+      return {
+        success: result.success,
+        sectorsRestored: result.sectorsRestored,
+        sectorsTotal: result.sectorsTotal,
+        error: result.error,
+      };
+    } catch (e: any) {
+      return { success: false, sectorsRestored: 0, sectorsTotal: 0, error: 'Restore failed: ' + (e?.message || String(e)) };
+    }
+  }
+
+  // ==================== DIAGNOSTIC TROUBLE CODES ====================
+
+  async readDTCs(): Promise<import('@/types').DTCReading[]> {
+    if (this.state.connectionState !== 'connected') {
+      return [];
+    }
+    try {
+      const result = await OBD2Bridge.readDTCs();
+      return result.readings || [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  async clearDTCs(ecuAddress?: string): Promise<{ success: boolean; cleared: number }> {
+    if (this.state.connectionState !== 'connected') {
+      return { success: false, cleared: 0 };
+    }
+    try {
+      const result = await OBD2Bridge.clearDTCs({ ecuAddress });
+      return { success: result.success, cleared: result.cleared };
+    } catch (e) {
+      return { success: false, cleared: 0 };
+    }
+  }
+
+  // ==================== PRIVATE METHODS ====================
+
   private setupFlashListeners() {
     this.removeFlashListeners();
     OBD2Bridge.addListener('flashProgress', (data: FlashProgressEvent) => {
