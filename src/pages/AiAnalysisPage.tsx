@@ -11,12 +11,13 @@ export const AiAnalysisPage: React.FC = () => {
     refreshAiAnalysis, applyRecommendation, isAiTuning, setIsAiTuning
   } = useStore();
 
+  // Refresh analysis when real live data changes (from OBD2)
+  // Only analyze when engine is running (RPM > 0)
   useEffect(() => {
-    const interval = setInterval(() => {
+    if (liveData.rpm > 0 && currentMap) {
       refreshAiAnalysis();
-    }, 2000);
-    return () => clearInterval(interval);
-  }, [refreshAiAnalysis]);
+    }
+  }, [liveData.rpm, liveData.boost, liveData.afr, liveData.knock, liveData.iat, liveData.oilTemp]);
 
   const getSeverityIcon = (severity: string) => {
     switch (severity) {
@@ -92,28 +93,45 @@ export const AiAnalysisPage: React.FC = () => {
       </div>
 
       <div className="flex-1 overflow-auto p-4 space-y-4">
-        {/* Live Data Summary */}
+        {/* Live Data Summary - from REAL OBD2 */}
         <div className="grid grid-cols-4 gap-3">
           <div className="bg-[#0d1117] rounded-xl p-3 border border-gray-800">
             <div className="text-xs text-gray-500">RPM</div>
-            <div className="text-lg font-mono text-white">{liveData.rpm.toLocaleString()}</div>
+            <div className={`text-lg font-mono ${liveData.rpm > 0 ? 'text-white' : 'text-gray-600'}`}>
+              {liveData.rpm > 0 ? liveData.rpm.toLocaleString() : '---'}
+            </div>
           </div>
           <div className="bg-[#0d1117] rounded-xl p-3 border border-gray-800">
             <div className="text-xs text-gray-500">Boost</div>
-            <div className="text-lg font-mono text-orange-400">{liveData.boost.toFixed(2)} bar</div>
+            <div className={`text-lg font-mono ${liveData.rpm > 0 ? 'text-orange-400' : 'text-gray-600'}`}>
+              {liveData.rpm > 0 ? `${liveData.boost.toFixed(2)} bar` : '---'}
+            </div>
           </div>
           <div className="bg-[#0d1117] rounded-xl p-3 border border-gray-800">
             <div className="text-xs text-gray-500">AFR</div>
-            <div className="text-lg font-mono text-green-400">{liveData.afr.toFixed(2)} λ</div>
+            <div className={`text-lg font-mono ${liveData.rpm > 0 ? 'text-green-400' : 'text-gray-600'}`}>
+              {liveData.rpm > 0 ? `${liveData.afr.toFixed(2)} λ` : '---'}
+            </div>
           </div>
           <div className="bg-[#0d1117] rounded-xl p-3 border border-gray-800">
             <div className="text-xs text-gray-500">IAT</div>
-            <div className="text-lg font-mono text-blue-400">{Math.round(liveData.iat)}°C</div>
+            <div className={`text-lg font-mono ${liveData.rpm > 0 ? 'text-blue-400' : 'text-gray-600'}`}>
+              {liveData.rpm > 0 ? `${Math.round(liveData.iat)}°C` : '---'}
+            </div>
           </div>
         </div>
 
+        {/* Engine Off State */}
+        {liveData.rpm === 0 && (
+          <div className="text-center py-8 text-gray-500 bg-[#0d1117] rounded-xl border border-gray-800">
+            <CheckCircle className="w-12 h-12 mx-auto mb-3 text-gray-600" />
+            <p className="text-lg font-medium">Engine not running</p>
+            <p className="text-sm">Connect to vehicle and start engine for live AI analysis</p>
+          </div>
+        )}
+
         {/* AI Tuning Status */}
-        {isAiTuning && (
+        {isAiTuning && liveData.rpm > 0 && (
           <div className="bg-purple-500/10 border border-purple-500/30 rounded-xl p-4 flex items-center gap-3">
             <div className="w-8 h-8 rounded-full bg-purple-500/20 flex items-center justify-center">
               <Sparkles className="w-5 h-5 text-purple-400 animate-pulse" />
