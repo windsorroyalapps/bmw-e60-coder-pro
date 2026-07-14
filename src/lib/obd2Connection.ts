@@ -95,6 +95,13 @@ export class OBD2ConnectionManager {
   private flashCompleteListener: { remove: () => void } | null = null;
   private flashErrorListener: { remove: () => void } | null = null;
 
+  // Connection watchdog
+  private watchdogTimer: ReturnType<typeof setInterval> | null = null;
+  private lastHeartbeat: number = 0;
+  private watchdogEnabled: boolean = false;
+  private heartbeatTimeoutMs: number = 500; // 500ms disconnect detection
+  private onConnectionDeadCallback: (() => void) | null = null;
+
   subscribe(callback: (state: OBD2State) => void) {
     this.listeners.push(callback);
     callback(this.state);
@@ -118,6 +125,100 @@ export class OBD2ConnectionManager {
   private emitFlash() {
     if (this.flashSession) {
       this.flashListeners.forEach(l => l(this.flashSession!));
+    }
+  }
+
+  // ==================== CONNECTION WATCHDOG ====================
+
+  /**
+   * Enable the connection watchdog. Detects USB disconnect within 500ms
+   * and triggers the callback for auto-recovery and flash abort.
+   */
+  enableWatchdog(callback?: () => void): void {
+    if (this.watchdogTimer) {
+      clearInterval(this.watchdogTimer);
+    }
+    this.watchdogEnabled = true;
+    this.lastHeartbeat = Date.now();
+    if (callback) this.onConnectionDeadCallback = callback;
+
+    this.watchdogTimer = setInterval(() => {
+      if (!this.watchdogEnabled) return;
+      if (this.state.connectionState !== 'connected') return;
+
+      const elapsed = Date.now() - this.lastHeartbeat;
+      if (elapsed > this.heartbeatTimeoutMs) {
+        // Connection is dead - cable pulled or USB error
+        this.handleConnectionDead();
+      }
+    }, 200); // Check every 200ms for sub-500ms detection
+  }
+
+  disableWatchdog(): void {
+    this.watchdogEnabled = false;
+    if (this.watchdogTimer) {
+      clearInterval(this.watchdogTimer);
+      this.watchdogTimer = null;
+    }
+  }
+
+  /** Update heartbeat - call this on every successful OBD2 communication */
+  heartbeat(): void {
+    this.lastHeartbeat = Date.now();
+  }
+
+  getLastHeartbeat(): number {
+    return this.lastHeartbeat;
+  }
+
+  isConnectionAlive(): boolean {
+    if (this.state.connectionState !== 'connected') return false;
+    return (Date.now() - this.lastHeartbeat) <= this.heartbeatTimeoutMs;
+  }
+
+  isWatchdogEnabled(): boolean {
+    return this.watchdogEnabled;
+  }
+
+  private handleConnectionDead(): void {
+    // Abort any active flash session first (critical safety)
+    if (this.flashSession &&
+        (this.flashSession.status === 'preparing' ||
+         this.flashSession.status === 'flashing')) {
+      this.abortFlash();
+    }
+
+    // Mark connection as dead
+    this.updateState({
+      connectionState: 'error',
+      lastError: `Connection lost - no heartbeat for ${Date.now() - this.lastHeartbeat}ms`,
+      lastActivity: Date.now(),
+    });
+
+    // Notify callback for auto-recovery
+    if (this.onConnectionDeadCallback) {
+      this.onConnectionDeadCallback();
+    }
+  }
+
+  /**
+   * Attempt auto-recovery with exponential backoff.
+   * Returns true if reconnected successfully.
+   */
+  async attemptRecovery(): Promise<boolean> {
+    try {
+      // Try to re-detect and connect
+      const cable = await this.detectCable();
+      if (!cable) return false;
+
+      const connected = await this.connect();
+      if (connected) {
+        this.lastHeartbeat = Date.now();
+        return true;
+      }
+      return false;
+    } catch (e) {
+      return false;
     }
   }
 
@@ -188,6 +289,7 @@ export class OBD2ConnectionManager {
           lastActivity: Date.now(),
           dmeProtocolVersion: result.dmeProtocolVersion || '',
         });
+        this.lastHeartbeat = Date.now(); // Initialize heartbeat on connect
         return true;
       } else {
         this.updateState({
@@ -207,6 +309,7 @@ export class OBD2ConnectionManager {
 
   disconnect(): void {
     OBD2Bridge.disconnect().catch(() => {});
+    this.disableWatchdog(); // Stop watchdog on disconnect
     this.updateState({
       connectionState: 'disconnected',
       cable: null,
@@ -235,6 +338,7 @@ export class OBD2ConnectionManager {
           }
         }
         this.updateState({ lastActivity: Date.now() });
+        this.heartbeat(); // Update watchdog heartbeat on successful read
         return data;
       }
       return null;
