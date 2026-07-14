@@ -25,10 +25,12 @@ android {
 }
 
 repositories {
+    google()
+    mavenCentral()
+    maven { url 'https://jitpack.io' }
     flatDir{
         dirs '../capacitor-cordova-android-plugins/src/main/libs', 'libs'
     }
-    maven { url 'https://jitpack.io' }
 }
 
 dependencies {
