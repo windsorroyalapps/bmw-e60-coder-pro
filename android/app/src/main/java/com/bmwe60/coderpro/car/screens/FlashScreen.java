@@ -1,6 +1,7 @@
 package com.bmwe60.coderpro.car.screens;
 
 import androidx.annotation.NonNull;
+import androidx.car.app.CarContext;
 import androidx.car.app.Screen;
 import androidx.car.app.model.Action;
 import androidx.car.app.model.Template;
@@ -12,8 +13,8 @@ import androidx.car.app.model.Row;
  */
 public class FlashScreen extends Screen {
 
-    public FlashScreen(@NonNull Screen.ScreenListener listener) {
-        super(listener);
+    public FlashScreen(@NonNull CarContext carContext) {
+        super(carContext);
     }
 
     @NonNull
