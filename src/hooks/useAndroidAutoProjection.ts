@@ -35,24 +35,18 @@ export const useAndroidAutoProjection = () => {
           console.log('Presentation API not available');
         }
       }
+    };
 
-      // Listen for visibility changes
-      const handleVisibilityChange = () => {
-        const { setObd2ConnectionPaused } = useStore.getState();
-        if (document.hidden) {
-          setObd2ConnectionPaused(true);
-        } else {
-          setObd2ConnectionPaused(false);
-        }
-      };
-
-      document.addEventListener('visibilitychange', handleVisibilityChange);
-
-      return () => {
-        document.removeEventListener('visibilitychange', handleVisibilityChange);
-      };
+    // Listen for visibility changes — pause OBD2 polling when app is backgrounded
+    const handleVisibilityChange = () => {
+      useStore.getState().setObd2ConnectionPaused(document.hidden);
     };
 
     initProjection();
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, []);
 };
