@@ -75,9 +75,9 @@ export const ConnectionBar: React.FC = () => {
 
   return (
     <div className="bg-[#0d1117] border-b border-gray-800">
-      {/* Main Bar */}
+      {/* Top Row: Status (left) + Centered Connect Button + Flash/Expand (right) */}
       <div className="flex items-center gap-3 px-4 py-2">
-        {/* Connection Status Badge */}
+        {/* LEFT: Compact Status Badge */}
         <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-medium ${getStateColor()}`}>
           {getStateIcon()}
           <span>{getStateLabel()}</span>
@@ -88,79 +88,30 @@ export const ConnectionBar: React.FC = () => {
           )}
         </div>
 
-        {/* Battery */}
-        {obd2.connectionState === 'connected' && (
-          <div className="flex items-center gap-1.5 text-xs">
-            <Battery className="w-3.5 h-3.5 text-green-400" />
-            <span className="text-green-400 font-mono">{obd2.batteryVoltage.toFixed(1)}V</span>
-          </div>
-        )}
-
-        {/* ECU Count */}
-        {obd2.connectionState === 'connected' && (
-          <div className="flex items-center gap-1.5 text-xs">
-            <Cpu className="w-3.5 h-3.5 text-blue-400" />
-            <span className="text-blue-400">{ecuOnline}/{ecuTotal} ECUs</span>
-          </div>
-        )}
-
-        {/* Protocol */}
-        {obd2.connectionState === 'connected' && obd2.dmeProtocolVersion && (
-          <div className="flex items-center gap-1.5 text-xs text-gray-500">
-            <Zap className="w-3.5 h-3.5" />
-            <span>{obd2.dmeProtocolVersion}</span>
-          </div>
-        )}
-
-        {/* Watchdog / Connection Dead Indicator */}
-        {obd2.connectionState === 'connected' && (
-          <div className="flex items-center gap-2">
-            {connectionDead ? (
-              <div className="flex items-center gap-1.5 text-xs bg-red-500/10 text-red-400 px-2 py-1 rounded border border-red-500/20 animate-pulse">
-                <HeartPulse className="w-3.5 h-3.5" />
-                <span>DEAD</span>
-                {autoReconnectAttempts > 0 && (
-                  <span className="text-gray-400">({autoReconnectAttempts}/{maxAutoReconnectAttempts})</span>
-                )}
-              </div>
-            ) : (
-              <button
-                onClick={() => setWatchdogEnabled(!watchdogEnabled)}
-                title={watchdogEnabled ? 'Watchdog active (500ms)' : 'Watchdog disabled'}
-                className={`flex items-center gap-1 text-xs px-2 py-1 rounded border transition-colors ${
-                  watchdogEnabled
-                    ? 'bg-green-500/10 text-green-400 border-green-500/20 hover:bg-green-500/20'
-                    : 'bg-gray-800 text-gray-500 border-gray-700 hover:bg-gray-700'
-                }`}
-              >
-                {watchdogEnabled ? <Shield className="w-3 h-3" /> : <ShieldOff className="w-3 h-3" />}
-                <span className="hidden sm:inline">{watchdogEnabled ? 'WD' : 'WD Off'}</span>
-              </button>
-            )}
-          </div>
-        )}
-
-        <div className="ml-auto flex items-center gap-2">
-          {/* Connect/Disconnect Button */}
+        {/* CENTER: Connect/Disconnect Button - always centered */}
+        <div className="flex-1 flex justify-center">
           {obd2.connectionState === 'connected' ? (
             <button
               onClick={handleDisconnect}
-              className="flex items-center gap-1.5 bg-red-600/20 hover:bg-red-600/30 text-red-400 text-xs px-3 py-1.5 rounded-lg transition-colors border border-red-500/20"
+              className="flex items-center gap-2 bg-red-600/20 hover:bg-red-600/30 text-red-400 text-sm font-medium px-5 py-2 rounded-lg transition-colors border border-red-500/20"
             >
-              <Unplug className="w-3.5 h-3.5" />
+              <Unplug className="w-4 h-4" />
               Disconnect
             </button>
           ) : (
             <button
               onClick={handleConnect}
               disabled={isConnecting}
-              className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-800 text-white text-xs px-3 py-1.5 rounded-lg transition-colors"
+              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-800 text-white text-sm font-medium px-6 py-2 rounded-lg transition-colors shadow-lg shadow-blue-600/20"
             >
-              {isConnecting ? <Loader className="w-3.5 h-3.5 animate-spin" /> : <Plug className="w-3.5 h-3.5" />}
+              {isConnecting ? <Loader className="w-4 h-4 animate-spin" /> : <Plug className="w-4 h-4" />}
               {isConnecting ? 'Connecting...' : 'Connect'}
             </button>
           )}
+        </div>
 
+        {/* RIGHT: Flash + Expand + Watchdog */}
+        <div className="flex items-center gap-2">
           {/* Flash Button (only when connected) */}
           {obd2.connectionState === 'connected' && (
             <button
@@ -172,7 +123,7 @@ export const ConnectionBar: React.FC = () => {
             </button>
           )}
 
-          {/* Expand */}
+          {/* Expand (only when connected) */}
           {obd2.connectionState === 'connected' && (
             <button
               onClick={() => setExpanded(!expanded)}
@@ -183,6 +134,55 @@ export const ConnectionBar: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* Second Row: Detailed Stats (when connected) */}
+      {obd2.connectionState === 'connected' && (
+        <div className="flex items-center gap-4 px-4 pb-2 border-t border-gray-800/50 pt-1.5">
+          {/* Battery */}
+          <div className="flex items-center gap-1.5 text-xs">
+            <Battery className="w-3.5 h-3.5 text-green-400" />
+            <span className="text-green-400 font-mono">{obd2.batteryVoltage.toFixed(1)}V</span>
+          </div>
+
+          {/* ECU Count */}
+          <div className="flex items-center gap-1.5 text-xs">
+            <Cpu className="w-3.5 h-3.5 text-blue-400" />
+            <span className="text-blue-400">{ecuOnline}/{ecuTotal} ECUs</span>
+          </div>
+
+          {/* Protocol */}
+          {obd2.dmeProtocolVersion && (
+            <div className="flex items-center gap-1.5 text-xs text-gray-500">
+              <Zap className="w-3.5 h-3.5" />
+              <span>{obd2.dmeProtocolVersion}</span>
+            </div>
+          )}
+
+          {/* Watchdog Toggle / Dead Indicator */}
+          {connectionDead ? (
+            <div className="flex items-center gap-1.5 text-xs bg-red-500/10 text-red-400 px-2 py-1 rounded border border-red-500/20 animate-pulse">
+              <HeartPulse className="w-3.5 h-3.5" />
+              <span>DEAD</span>
+              {autoReconnectAttempts > 0 && (
+                <span className="text-gray-400">({autoReconnectAttempts}/{maxAutoReconnectAttempts})</span>
+              )}
+            </div>
+          ) : (
+            <button
+              onClick={() => setWatchdogEnabled(!watchdogEnabled)}
+              title={watchdogEnabled ? 'Watchdog active (500ms)' : 'Watchdog disabled'}
+              className={`flex items-center gap-1 text-xs px-2 py-1 rounded border transition-colors ${
+                watchdogEnabled
+                  ? 'bg-green-500/10 text-green-400 border-green-500/20 hover:bg-green-500/20'
+                  : 'bg-gray-800 text-gray-500 border-gray-700 hover:bg-gray-700'
+              }`}
+            >
+              {watchdogEnabled ? <Shield className="w-3 h-3" /> : <ShieldOff className="w-3 h-3" />}
+              <span className="hidden sm:inline">{watchdogEnabled ? 'WD' : 'WD Off'}</span>
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Expanded ECU List */}
       {expanded && obd2.connectionState === 'connected' && (
