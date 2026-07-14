@@ -12,6 +12,7 @@ import { LogsPage } from '@/pages/LogsPage';
 import { SettingsPage } from '@/pages/SettingsPage';
 import { GamepadPage } from '@/pages/GamepadPage';
 import { useAndroidAutoProjection } from '@/hooks/useAndroidAutoProjection';
+import { useConnectionWatchdog } from '@/hooks/useConnectionWatchdog';
 import {
   Home, Gauge, Zap, Brain, FileText, Settings, Shuffle, Gamepad2
 } from 'lucide-react';
@@ -33,6 +34,9 @@ function App() {
 
   // Enable Android Auto projection
   useAndroidAutoProjection();
+
+  // Enable connection watchdog + auto-recovery (500ms disconnect detection)
+  useConnectionWatchdog();
 
   // Real OBD2 live data polling - reads from actual vehicle ECU
   useEffect(() => {
