@@ -54,18 +54,23 @@ export const FlashModal: React.FC = () => {
     if (result.success && result.session) {
       setSession(result.session);
       setFlashSession(result.session);
-      // Start progress simulation
-      simulateProgress(result.session);
+      // Start the actual flash execution - progress comes from native events
+      obd2Manager.executeFlash();
+
+      // Subscribe to flash state changes to update UI
+      const unsub = obd2Manager.subscribeFlash((flashState) => {
+        setSession({ ...flashState });
+        if (flashState.status === 'complete') {
+          setStep('complete');
+          unsub();
+        } else if (flashState.status === 'error' || flashState.status === 'aborted') {
+          setStep('error');
+          unsub();
+        }
+      });
     } else {
       setStep('error');
     }
-  };
-
-  const simulateProgress = async (flashSess: FlashSession) => {
-    await obd2Manager.executeFlash();
-    setSession({ ...flashSess, status: 'complete', progress: 100 });
-    setFlashSession({ ...flashSess, status: 'complete', progress: 100 });
-    setStep('complete');
   };
 
   const handleAbort = () => {
@@ -240,7 +245,7 @@ export const FlashModal: React.FC = () => {
               </div>
               {flashType === 'live' && (
                 <div className="bg-purple-500/10 border border-purple-500/30 rounded-xl p-3 text-xs text-purple-300">
-                  Live flash writes only calibration tables while engine is running. 
+                  Live flash writes only calibration tables while engine is running.
                   Do not turn off ignition during flash. Keep RPM stable.
                 </div>
               )}
@@ -253,7 +258,7 @@ export const FlashModal: React.FC = () => {
             </>
           )}
 
-          {/* Step 4: Flashing */}
+          {/* Step 4: Flashing - Real progress from native */}
           {step === 'flashing' && session && (
             <div className="space-y-4">
               <div className="flex items-center gap-3">
