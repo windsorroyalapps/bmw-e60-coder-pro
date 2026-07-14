@@ -4,6 +4,7 @@
 
 import { registerPlugin } from '@capacitor/core';
 import type { PluginListenerHandle } from '@capacitor/core';
+import type { DTCReading } from '@/types';
 
 export interface OBD2BridgePlugin {
   // Cable detection
@@ -162,18 +163,8 @@ export interface BackupSectorInfo {
   backedUp: boolean;
 }
 
-export interface DTCReading {
-  ecuName: string;
-  ecuAddress: string;
-  codes: {
-    code: string;
-    status: string;
-    description: string;
-    firstSeen?: number;
-    lastSeen?: number;
-    count?: number;
-  }[];
-}
+// Re-export DTCReading from @/types for consumers
+export type { DTCReading };
 
 // Register the native plugin
 export const OBD2Bridge = registerPlugin<OBD2BridgePlugin>('OBD2Bridge', {
