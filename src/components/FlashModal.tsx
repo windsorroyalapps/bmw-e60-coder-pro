@@ -2,20 +2,71 @@ import React, { useState } from 'react';
 import { useStore } from '@/hooks/useStore';
 import { obd2Manager } from '@/lib/obd2Connection';
 import type { FlashSession } from '@/lib/obd2Connection';
+import type { FlashBackup } from '@/types';
 import {
   X, Zap, AlertTriangle, CheckCircle, Loader,
-  ShieldAlert, Play, Square,
-  Flashlight, FileDown, Activity
+  ShieldAlert, Play, Square, RotateCcw,
+  Save, HardDrive, FileWarning
 } from 'lucide-react';
 
 export const FlashModal: React.FC = () => {
-  const { showFlashModal, setShowFlashModal, obd2, currentMap, profile, liveData, setFlashSession } = useStore();
-  const [step, setStep] = useState<'select' | 'checks' | 'confirm' | 'flashing' | 'complete' | 'error'>('select');
+  const {
+    showFlashModal, setShowFlashModal, obd2, currentMap, profile,
+    liveData, setFlashSession, flashBackups, addFlashBackup
+  } = useStore();
+
+  const [step, setStep] = useState<'backup' | 'verify' | 'select' | 'checks' | 'confirm' | 'flashing' | 'complete' | 'error'>('backup');
   const [flashType, setFlashType] = useState<'full' | 'quick' | 'live'>('quick');
   const [session, setSession] = useState<FlashSession | null>(null);
   const [safetyChecks, setSafetyChecks] = useState<{ name: string; pass: boolean; critical: boolean }[]>([]);
+  const [dmeInfo, setDmeInfo] = useState<{ vin: string; ecuType: string; software: string } | null>(null);
+  const [vinMismatch, setVinMismatch] = useState(false);
+  const [backingUp, setBackingUp] = useState(false);
+  const [backupProgress, setBackupProgress] = useState(0);
+  const [backupSector, setBackupSector] = useState('');
 
   if (!showFlashModal) return null;
+
+  const runBackup = async () => {
+    setBackingUp(true);
+    setBackupProgress(0);
+    try {
+      const unsub = await obd2Manager.addBackupProgressListener((p) => {
+        setBackupProgress(p.progress);
+        setBackupSector(p.currentSector);
+      });
+
+      const result = await obd2Manager.backupDME();
+      unsub();
+
+      if (result.success && result.backup) {
+        addFlashBackup(result.backup);
+      }
+      setBackingUp(false);
+      setStep('verify');
+      runVINVerification();
+    } catch (e) {
+      setBackingUp(false);
+      // Continue even if backup fails - user acknowledged risk
+      setStep('verify');
+      runVINVerification();
+    }
+  };
+
+  const runVINVerification = async () => {
+    try {
+      const info = await obd2Manager.readDMEInfo();
+      if (info) {
+        setDmeInfo(info);
+        // Check VIN match if profile has a VIN
+        if (profile.vin && profile.vin.length > 0 && info.vin !== profile.vin) {
+          setVinMismatch(true);
+        }
+      }
+    } catch (e) {
+      // Continue without VIN verification
+    }
+  };
 
   const runSafetyChecks = () => {
     const checks = [
@@ -26,13 +77,18 @@ export const FlashModal: React.FC = () => {
       { name: 'Vehicle Speed < 5 km/h', pass: flashType === 'live' ? liveData.speed < 5 : true, critical: flashType !== 'full' },
       { name: 'Map validated', pass: currentMap !== null, critical: true },
       { name: 'No active faults', pass: obd2.ecus.reduce((a, e) => a + e.faultCodes, 0) === 0, critical: false },
+      { name: 'VIN Verified', pass: !vinMismatch, critical: true },
     ];
     setSafetyChecks(checks);
     return checks.every(c => c.pass || !c.critical);
   };
 
   const handleNext = () => {
-    if (step === 'select') {
+    if (step === 'backup') {
+      runBackup();
+    } else if (step === 'verify') {
+      setStep('select');
+    } else if (step === 'select') {
       setStep('checks');
       const passed = runSafetyChecks();
       if (passed) {
@@ -47,6 +103,11 @@ export const FlashModal: React.FC = () => {
     }
   };
 
+  const handleSkipBackup = () => {
+    setStep('verify');
+    runVINVerification();
+  };
+
   const startFlash = async () => {
     setStep('flashing');
     const isLive = flashType === 'live';
@@ -54,10 +115,8 @@ export const FlashModal: React.FC = () => {
     if (result.success && result.session) {
       setSession(result.session);
       setFlashSession(result.session);
-      // Start the actual flash execution - progress comes from native events
       obd2Manager.executeFlash();
 
-      // Subscribe to flash state changes to update UI
       const unsub = obd2Manager.subscribeFlash((flashState) => {
         setSession({ ...flashState });
         if (flashState.status === 'complete') {
@@ -80,19 +139,51 @@ export const FlashModal: React.FC = () => {
 
   const handleClose = () => {
     setShowFlashModal(false);
-    setStep('select');
+    setStep('backup');
     setSession(null);
     setFlashSession(null);
     setSafetyChecks([]);
+    setDmeInfo(null);
+    setVinMismatch(false);
+    setBackingUp(false);
+    setBackupProgress(0);
+  };
+
+  const handleRestore = async (backup: FlashBackup) => {
+    setStep('flashing');
+    setSession({
+      id: `restore_${Date.now()}`,
+      startTime: Date.now(),
+      status: 'flashing',
+      progress: 0,
+      currentSector: 'Starting restore...',
+      sectorsTotal: backup.sectors.length,
+      sectorsComplete: 0,
+      bytesWritten: 0,
+      bytesTotal: backup.totalBytes,
+      speed: 0,
+      eta: 120,
+      errors: [],
+      isLiveFlash: false,
+      vehicleSpeed: 0,
+      batteryVoltage: obd2.batteryVoltage,
+    });
+
+    const result = await obd2Manager.restoreDME(backup.id);
+    if (result.success) {
+      setStep('complete');
+    } else {
+      setStep('error');
+    }
   };
 
   const allCriticalPassed = safetyChecks.filter(c => c.critical).every(c => c.pass);
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-      <div className="bg-[#0d1117] rounded-2xl border border-gray-700 shadow-2xl w-full max-w-lg overflow-hidden">
+      <div className="bg-[#0d1117] rounded-2xl border border-gray-700 shadow-2xl w-full max-w-lg overflow-hidden max-h-[90vh] flex flex-col">
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-800">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-800 flex-shrink-0">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-lg bg-orange-500/10 flex items-center justify-center">
               <Zap className="w-5 h-5 text-orange-400" />
@@ -109,8 +200,103 @@ export const FlashModal: React.FC = () => {
           </button>
         </div>
 
-        <div className="p-5 space-y-4">
-          {/* Step 1: Select Flash Type */}
+        <div className="p-5 space-y-4 overflow-y-auto flex-1">
+          {/* Step 0: Backup */}
+          {step === 'backup' && (
+            <>
+              <div className="bg-blue-500/10 border border-blue-500/30 rounded-xl p-4">
+                <div className="flex items-center gap-3 mb-3">
+                  <Save className="w-6 h-6 text-blue-400" />
+                  <h3 className="font-bold text-white">Backup DME Memory</h3>
+                </div>
+                <p className="text-sm text-gray-400 mb-4">
+                  Before flashing, we strongly recommend backing up your current DME memory.
+                  This allows one-tap recovery if something goes wrong.
+                </p>
+                {flashBackups.length > 0 && (
+                  <div className="mb-4">
+                    <p className="text-xs text-gray-500 mb-2">Existing backups ({flashBackups.length}):</p>
+                    <div className="space-y-1 max-h-24 overflow-y-auto">
+                      {flashBackups.map(b => (
+                        <div key={b.id} className="flex items-center justify-between bg-[#161b22] rounded-lg p-2">
+                          <div className="text-xs">
+                            <span className="text-gray-300">{new Date(b.createdAt).toLocaleString()}</span>
+                            <span className="text-gray-500 ml-2">{b.vin}</span>
+                          </div>
+                          <button
+                            onClick={() => handleRestore(b)}
+                            className="text-xs text-orange-400 hover:text-orange-300 flex items-center gap-1"
+                          >
+                            <RotateCcw className="w-3 h-3" />
+                            Restore
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+              {backingUp && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 text-sm text-blue-400">
+                    <Loader className="w-4 h-4 animate-spin" />
+                    Backing up DME... {backupProgress}%
+                  </div>
+                  <div className="w-full bg-gray-800 rounded-full h-2">
+                    <div className="h-2 bg-blue-500 rounded-full transition-all" style={{ width: `${backupProgress}%` }} />
+                  </div>
+                  <p className="text-xs text-gray-500">{backupSector}</p>
+                </div>
+              )}
+            </>
+          )}
+
+          {/* Step 1: VIN Verification */}
+          {step === 'verify' && (
+            <>
+              <div className={`rounded-xl p-4 border ${vinMismatch ? 'bg-red-500/10 border-red-500/30' : 'bg-green-500/10 border-green-500/30'}`}>
+                <div className="flex items-center gap-3 mb-3">
+                  {vinMismatch ? <FileWarning className="w-6 h-6 text-red-400" /> : <CheckCircle className="w-6 h-6 text-green-400" />}
+                  <h3 className="font-bold text-white">VIN / ECU Verification</h3>
+                </div>
+                {dmeInfo ? (
+                  <div className="space-y-2 text-sm">
+                    <div className="flex justify-between text-gray-400">
+                      <span>Connected VIN</span>
+                      <span className="text-white font-mono">{dmeInfo.vin || 'Not available'}</span>
+                    </div>
+                    <div className="flex justify-between text-gray-400">
+                      <span>Profile VIN</span>
+                      <span className="text-white font-mono">{profile.vin || 'Not set'}</span>
+                    </div>
+                    <div className="flex justify-between text-gray-400">
+                      <span>ECU Type</span>
+                      <span className="text-white">{dmeInfo.ecuType || 'Unknown'}</span>
+                    </div>
+                    <div className="flex justify-between text-gray-400">
+                      <span>Software</span>
+                      <span className="text-white">{dmeInfo.software || 'Unknown'}</span>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-400">Could not read DME info. Proceed with caution.</p>
+                )}
+                {vinMismatch && (
+                  <div className="mt-3 text-xs text-red-300 bg-red-500/10 p-2 rounded">
+                    VIN mismatch detected! Connected ECU does not match your vehicle profile.
+                    Flashing a tune for a different vehicle can cause serious damage.
+                  </div>
+                )}
+                {!vinMismatch && profile.vin && dmeInfo?.vin && (
+                  <div className="mt-3 text-xs text-green-300 bg-green-500/10 p-2 rounded">
+                    VIN verified - connected ECU matches your vehicle profile.
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+
+          {/* Step 2: Select Flash Type */}
           {step === 'select' && (
             <>
               <p className="text-sm text-gray-400 mb-3">Choose flash method:</p>
@@ -122,7 +308,7 @@ export const FlashModal: React.FC = () => {
                   }`}
                 >
                   <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${flashType === 'quick' ? 'bg-blue-500/20' : 'bg-gray-800'}`}>
-                    <Flashlight className={`w-5 h-5 ${flashType === 'quick' ? 'text-blue-400' : 'text-gray-500'}`} />
+                    <Zap className={`w-5 h-5 ${flashType === 'quick' ? 'text-blue-400' : 'text-gray-500'}`} />
                   </div>
                   <div className="flex-1">
                     <div className="font-semibold text-white">Quick Flash</div>
@@ -138,7 +324,7 @@ export const FlashModal: React.FC = () => {
                   }`}
                 >
                   <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${flashType === 'full' ? 'bg-orange-500/20' : 'bg-gray-800'}`}>
-                    <FileDown className={`w-5 h-5 ${flashType === 'full' ? 'text-orange-400' : 'text-gray-500'}`} />
+                    <HardDrive className={`w-5 h-5 ${flashType === 'full' ? 'text-orange-400' : 'text-gray-500'}`} />
                   </div>
                   <div className="flex-1">
                     <div className="font-semibold text-white">Full Flash</div>
@@ -154,7 +340,7 @@ export const FlashModal: React.FC = () => {
                   }`}
                 >
                   <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${flashType === 'live' ? 'bg-purple-500/20' : 'bg-gray-800'}`}>
-                    <Activity className={`w-5 h-5 ${flashType === 'live' ? 'text-purple-400' : 'text-gray-500'}`} />
+                    <Play className={`w-5 h-5 ${flashType === 'live' ? 'text-purple-400' : 'text-gray-500'}`} />
                   </div>
                   <div className="flex-1">
                     <div className="font-semibold text-white flex items-center gap-2">
@@ -169,7 +355,7 @@ export const FlashModal: React.FC = () => {
             </>
           )}
 
-          {/* Step 2: Safety Checks */}
+          {/* Step 3: Safety Checks */}
           {step === 'checks' && (
             <>
               <p className="text-sm text-gray-400 mb-3">Running pre-flash safety checks...</p>
@@ -208,7 +394,7 @@ export const FlashModal: React.FC = () => {
             </>
           )}
 
-          {/* Step 3: Confirm */}
+          {/* Step 4: Confirm */}
           {step === 'confirm' && (
             <>
               <div className="bg-orange-500/10 border border-orange-500/30 rounded-xl p-4">
@@ -237,28 +423,28 @@ export const FlashModal: React.FC = () => {
                     <span>Battery</span>
                     <span className="text-green-400">{obd2.batteryVoltage.toFixed(1)}V</span>
                   </div>
+                  {dmeInfo?.vin && (
+                    <div className="flex justify-between text-gray-400">
+                      <span>VIN</span>
+                      <span className="text-white font-mono text-xs">{dmeInfo.vin}</span>
+                    </div>
+                  )}
                   <div className="flex justify-between text-gray-400">
                     <span>Est. Time</span>
                     <span className="text-white">{flashType === 'quick' ? '~2s' : flashType === 'live' ? '~3s' : '~2min'}</span>
                   </div>
                 </div>
               </div>
-              {flashType === 'live' && (
-                <div className="bg-purple-500/10 border border-purple-500/30 rounded-xl p-3 text-xs text-purple-300">
-                  Live flash writes only calibration tables while engine is running.
-                  Do not turn off ignition during flash. Keep RPM stable.
-                </div>
-              )}
-              {flashType === 'full' && (
-                <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-3 text-xs text-red-300">
-                  Full flash requires ignition ON, engine OFF. Do not disconnect cable.
-                  Ensure stable 13V+ power supply.
+              {flashBackups.length > 0 && (
+                <div className="bg-green-500/10 border border-green-500/30 rounded-xl p-3 text-xs text-green-300 flex items-center gap-2">
+                  <CheckCircle className="w-4 h-4 flex-shrink-0" />
+                  DME backup available - restore possible if needed
                 </div>
               )}
             </>
           )}
 
-          {/* Step 4: Flashing - Real progress from native */}
+          {/* Step 5: Flashing */}
           {step === 'flashing' && session && (
             <div className="space-y-4">
               <div className="flex items-center gap-3">
@@ -268,15 +454,9 @@ export const FlashModal: React.FC = () => {
                   <div className="text-xs text-gray-400">{session.currentSector}</div>
                 </div>
               </div>
-
-              {/* Progress Bar */}
               <div className="w-full bg-gray-800 rounded-full h-3">
-                <div
-                  className="h-3 bg-orange-500 rounded-full transition-all duration-300"
-                  style={{ width: `${session.progress}%` }}
-                />
+                <div className="h-3 bg-orange-500 rounded-full transition-all duration-300" style={{ width: `${session.progress}%` }} />
               </div>
-
               <div className="grid grid-cols-3 gap-3 text-center">
                 <div className="bg-[#161b22] rounded-lg p-2">
                   <div className="text-xs text-gray-500">Progress</div>
@@ -291,12 +471,6 @@ export const FlashModal: React.FC = () => {
                   <div className="text-sm font-mono text-white">{session.eta}s</div>
                 </div>
               </div>
-
-              <div className="text-xs text-gray-500">
-                Sectors: {session.sectorsComplete}/{session.sectorsTotal} complete
-              </div>
-
-              {/* Abort Button */}
               <button
                 onClick={handleAbort}
                 className="w-full flex items-center justify-center gap-2 bg-red-600/20 hover:bg-red-600/30 text-red-400 text-sm py-2.5 rounded-lg transition-colors border border-red-500/20"
@@ -307,7 +481,7 @@ export const FlashModal: React.FC = () => {
             </div>
           )}
 
-          {/* Step 5: Complete */}
+          {/* Step 6: Complete */}
           {step === 'complete' && (
             <div className="text-center space-y-4">
               <div className="w-16 h-16 rounded-full bg-green-500/10 flex items-center justify-center mx-auto">
@@ -348,16 +522,57 @@ export const FlashModal: React.FC = () => {
                   {session?.status === 'aborted' ? 'Flash was aborted by user' : 'An error occurred during flashing'}
                 </p>
               </div>
+              {flashBackups.length > 0 && (
+                <div className="bg-orange-500/10 border border-orange-500/30 rounded-xl p-3">
+                  <p className="text-xs text-orange-300 mb-2">A backup is available. You can restore your original tune:</p>
+                  <button
+                    onClick={() => handleRestore(flashBackups[0])}
+                    className="w-full flex items-center justify-center gap-2 bg-orange-600 hover:bg-orange-700 text-white text-sm py-2 rounded-lg transition-colors"
+                  >
+                    <RotateCcw className="w-4 h-4" />
+                    Restore Original Tune
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>
 
         {/* Footer Actions */}
-        <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-gray-800 bg-[#0a0a0a]">
-          {step === 'select' && (
+        <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-gray-800 bg-[#0a0a0a] flex-shrink-0">
+          {step === 'backup' && (
+            <>
+              <button onClick={handleSkipBackup} className="text-sm text-gray-400 hover:text-white px-4 py-2 transition-colors">
+                Skip Backup
+              </button>
+              <button
+                onClick={handleNext}
+                disabled={backingUp}
+                className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 text-white text-sm px-4 py-2 rounded-lg transition-colors"
+              >
+                {backingUp ? <Loader className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                {backingUp ? 'Backing up...' : 'Backup & Continue'}
+              </button>
+            </>
+          )}
+          {step === 'verify' && (
             <>
               <button onClick={handleClose} className="text-sm text-gray-400 hover:text-white px-4 py-2 transition-colors">
                 Cancel
+              </button>
+              <button
+                onClick={handleNext}
+                className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm px-4 py-2 rounded-lg transition-colors"
+              >
+                Next
+                <Play className="w-3.5 h-3.5" />
+              </button>
+            </>
+          )}
+          {step === 'select' && (
+            <>
+              <button onClick={() => setStep('verify')} className="text-sm text-gray-400 hover:text-white px-4 py-2 transition-colors">
+                Back
               </button>
               <button
                 onClick={handleNext}
