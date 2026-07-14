@@ -11,10 +11,11 @@ import { AiAnalysisPage } from '@/pages/AiAnalysisPage';
 import { LogsPage } from '@/pages/LogsPage';
 import { SettingsPage } from '@/pages/SettingsPage';
 import { GamepadPage } from '@/pages/GamepadPage';
+import { DTCPage } from '@/pages/DTCPage';
 import { useAndroidAutoProjection } from '@/hooks/useAndroidAutoProjection';
 import { useConnectionWatchdog } from '@/hooks/useConnectionWatchdog';
 import {
-  Home, Gauge, Zap, Brain, FileText, Settings, Shuffle, Gamepad2
+  Home, Gauge, Zap, Brain, FileText, Settings, Shuffle, Gamepad2, AlertTriangle
 } from 'lucide-react';
 import './App.css';
 
@@ -23,6 +24,7 @@ const NAV_ITEMS = [
   { id: 'gauges', label: 'Gauges', icon: Gauge },
   { id: 'tuning', label: 'Tuning', icon: Zap },
   { id: 'ai', label: 'AI', icon: Brain },
+  { id: 'dtc', label: 'Faults', icon: AlertTriangle },
   { id: 'gamepad', label: 'Drive', icon: Gamepad2 },
   { id: 'logs', label: 'Logs', icon: FileText },
   { id: 'settings', label: 'Setup', icon: Settings },
@@ -105,6 +107,7 @@ function App() {
       case 'gauges': return <GaugeDashboard />;
       case 'tuning': return <TuningPage />;
       case 'ai': return <AiAnalysisPage />;
+      case 'dtc': return <DTCPage />;
       case 'logs': return <LogsPage />;
       case 'gamepad': return <GamepadPage />;
       case 'settings': return <SettingsPage />;
