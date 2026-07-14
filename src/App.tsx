@@ -28,7 +28,7 @@ const NAV_ITEMS = [
 ];
 
 function App() {
-  const { activeScreen, setActiveScreen, setShowQuickSwitch, obd2, updateLiveData, isLogging, currentSession, addLogEntry } = useStore();
+  const { activeScreen, setActiveScreen, setShowQuickSwitch, obd2, updateLiveData, isLogging, currentSession, addLogEntry, obd2ConnectionPaused } = useStore();
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Enable Android Auto projection
@@ -36,7 +36,7 @@ function App() {
 
   // Real OBD2 live data polling - reads from actual vehicle ECU
   useEffect(() => {
-    if (obd2.connectionState === 'connected') {
+    if (obd2.connectionState === 'connected' && !obd2ConnectionPaused) {
       // Poll live data every 200ms from the real ECU
       pollIntervalRef.current = setInterval(async () => {
         const data = await obd2Manager.readLiveData();
@@ -85,7 +85,7 @@ function App() {
         pollIntervalRef.current = null;
       }
     };
-  }, [obd2.connectionState, isLogging, currentSession, updateLiveData, addLogEntry]);
+  }, [obd2.connectionState, obd2ConnectionPaused, isLogging, currentSession, updateLiveData, addLogEntry]);
 
   // Sync OBD2 state with store
   useEffect(() => {
