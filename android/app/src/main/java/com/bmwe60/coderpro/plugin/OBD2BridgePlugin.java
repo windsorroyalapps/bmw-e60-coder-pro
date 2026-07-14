@@ -102,7 +102,7 @@ public class OBD2BridgePlugin extends Plugin {
             List<KDCANProtocol.ECUInfo> ecus = kdcanProtocol.scanECUs();
 
             // Build ECU response array
-            JSONArray ecuArray = new JSONArray();
+            JSArray ecuArray = new JSArray();
             for (KDCANProtocol.ECUInfo ecu : ecus) {
                 JSObject ecuObj = new JSObject();
                 ecuObj.put("name", ecu.name);
@@ -129,7 +129,7 @@ public class OBD2BridgePlugin extends Plugin {
             diagnostics.put("totalConnectTime", kdcanProtocol.getTotalConnectTime());
             diagnostics.put("retries", kdcanProtocol.getRetryCount());
 
-            JSONArray errors = new JSONArray();
+            JSArray errors = new JSArray();
             for (String err : kdcanProtocol.getErrors()) {
                 errors.put(err);
             }
@@ -244,7 +244,8 @@ public class OBD2BridgePlugin extends Plugin {
     public void startFlash(PluginCall call) {
         boolean isLiveFlash = call.getBoolean("isLiveFlash", false);
         try {
-            JSObject result = dmeFlashService.startFlash(kdcanProtocol, isLiveFlash);
+            JSONObject jsonResult = dmeFlashService.startFlash(kdcanProtocol, isLiveFlash);
+            JSObject result = convertJsonObjectToJSObject(jsonResult);
             call.resolve(result);
         } catch (Exception e) {
             call.reject("FLASH_START_ERROR", "Failed to start flash: " + e.getMessage(), e);
@@ -301,7 +302,8 @@ public class OBD2BridgePlugin extends Plugin {
     @PluginMethod
     public void quickFlash(PluginCall call) {
         try {
-            JSObject result = dmeFlashService.quickFlash(kdcanProtocol);
+            JSONObject jsonResult = dmeFlashService.quickFlash(kdcanProtocol);
+            JSObject result = convertJsonObjectToJSObject(jsonResult);
             call.resolve(result);
         } catch (Exception e) {
             call.reject("QUICK_FLASH_ERROR", "Quick flash failed: " + e.getMessage(), e);
@@ -383,5 +385,20 @@ public class OBD2BridgePlugin extends Plugin {
         result.put("connected", kdcanProtocol.isConnected());
         result.put("usbOpen", usbManager.isPortOpen());
         call.resolve(result);
+    }
+
+    /**
+     * Helper method to convert JSONObject to JSObject.
+     */
+    private JSObject convertJsonObjectToJSObject(JSONObject json) throws JSONException {
+        JSObject result = new JSObject();
+        if (json != null) {
+            java.util.Iterator<String> keys = json.keys();
+            while (keys.hasNext()) {
+                String key = keys.next();
+                result.put(key, json.get(key));
+            }
+        }
+        return result;
     }
 }
