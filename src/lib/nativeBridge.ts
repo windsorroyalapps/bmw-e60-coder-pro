@@ -49,10 +49,28 @@ export interface OBD2BridgePlugin {
   // CAN bus
   sendCANCommands(options: { commands: CANCommand[] }): Promise<{ success: boolean; sent: number }>;
 
+  // Flash Backup / Restore
+  backupDME(): Promise<{
+    success: boolean;
+    backup?: BackupInfo;
+    error?: string;
+  }>;
+  restoreDME(options: { backupId: string }): Promise<{
+    success: boolean;
+    sectorsRestored: number;
+    sectorsTotal: number;
+    error?: string;
+  }>;
+
+  // Diagnostic Trouble Codes
+  readDTCs(): Promise<{ readings: DTCReading[] }>;
+  clearDTCs(options: { ecuAddress?: string }): Promise<{ success: boolean; cleared: number }>;
+
   // Event listeners
   addListener(eventName: 'flashProgress', listenerFunc: (data: FlashProgressEvent) => void): Promise<PluginListenerHandle>;
   addListener(eventName: 'flashComplete', listenerFunc: (data: { status: string }) => void): Promise<PluginListenerHandle>;
   addListener(eventName: 'flashError', listenerFunc: (data: { status: string; error: string }) => void): Promise<PluginListenerHandle>;
+  addListener(eventName: 'backupProgress', listenerFunc: (data: { progress: number; currentSector: string }) => void): Promise<PluginListenerHandle>;
 }
 
 export interface CableInfo {
@@ -121,6 +139,42 @@ export interface CANCommand {
   data: string;
 }
 
+export interface BackupInfo {
+  id: string;
+  createdAt: number;
+  vin: string;
+  ecuType: string;
+  softwareVersion: string;
+  engineType: string;
+  mapType: string;
+  batteryVoltage: number;
+  sectors: BackupSectorInfo[];
+  totalBytes: number;
+  status: string;
+  progress: number;
+}
+
+export interface BackupSectorInfo {
+  name: string;
+  startAddress: string;
+  size: number;
+  checksum: string;
+  backedUp: boolean;
+}
+
+export interface DTCReading {
+  ecuName: string;
+  ecuAddress: string;
+  codes: {
+    code: string;
+    status: string;
+    description: string;
+    firstSeen?: number;
+    lastSeen?: number;
+    count?: number;
+  }[];
+}
+
 // Register the native plugin
 export const OBD2Bridge = registerPlugin<OBD2BridgePlugin>('OBD2Bridge', {
   web: () => {
@@ -140,6 +194,10 @@ export const OBD2Bridge = registerPlugin<OBD2BridgePlugin>('OBD2Bridge', {
       quickFlash: async () => ({ success: false, message: 'Native OBD2 only available on Android' }),
       abortFlash: async () => ({ success: true }),
       sendCANCommands: async () => ({ success: false, sent: 0 }),
+      backupDME: async () => ({ success: false, error: 'Native backup not available on web' }),
+      restoreDME: async () => ({ success: false, sectorsRestored: 0, sectorsTotal: 0, error: 'Native restore not available on web' }),
+      readDTCs: async () => ({ readings: [] }),
+      clearDTCs: async () => ({ success: false, cleared: 0 }),
       addListener: async () => ({ remove: () => {} } as PluginListenerHandle),
     } as OBD2BridgePlugin;
   },
