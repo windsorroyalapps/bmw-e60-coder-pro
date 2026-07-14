@@ -11,7 +11,6 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -27,6 +26,7 @@ public class OBD2BridgePlugin extends Plugin {
     private KDCANProtocol kdcanProtocol;
     private CANBusManager canBusManager;
     private DMEFlashService dmeFlashService;
+    private DMEBackupService dmeBackupService;
 
     @Override
     public void load() {
@@ -35,12 +35,11 @@ public class OBD2BridgePlugin extends Plugin {
         kdcanProtocol = new KDCANProtocol();
         canBusManager = new CANBusManager();
         dmeFlashService = new DMEFlashService();
+        dmeBackupService = new DMEBackupService(getContext());
     }
 
-    /**
-     * Scan for connected K+DCAN USB cables.
-     * Returns actual detected cable info or empty if none found.
-     */
+    // ==================== CABLE DETECTION ====================
+
     @PluginMethod
     public void detectCable(PluginCall call) {
         JSObject result = new JSObject();
@@ -68,15 +67,12 @@ public class OBD2BridgePlugin extends Plugin {
         }
     }
 
-    /**
-     * Connect to vehicle via detected cable.
-     * Performs real OBD2 handshaking and ECU scanning.
-     */
+    // ==================== CONNECTION ====================
+
     @PluginMethod
     public void connect(PluginCall call) {
         JSObject result = new JSObject();
         try {
-            // Open USB serial port
             boolean opened = usbManager.openPort();
             if (!opened) {
                 result.put("success", false);
@@ -85,10 +81,8 @@ public class OBD2BridgePlugin extends Plugin {
                 return;
             }
 
-            // Initialize K+DCAN protocol
             kdcanProtocol.init(usbManager.getSerialPort());
 
-            // Perform OBD2 handshake
             boolean handshake = kdcanProtocol.performHandshake();
             if (!handshake) {
                 usbManager.closePort();
@@ -98,10 +92,8 @@ public class OBD2BridgePlugin extends Plugin {
                 return;
             }
 
-            // Scan for ECUs
             List<KDCANProtocol.ECUInfo> ecus = kdcanProtocol.scanECUs();
 
-            // Build ECU response array
             JSArray ecuArray = new JSArray();
             for (KDCANProtocol.ECUInfo ecu : ecus) {
                 JSObject ecuObj = new JSObject();
@@ -115,13 +107,9 @@ public class OBD2BridgePlugin extends Plugin {
                 ecuArray.put(ecuObj);
             }
 
-            // Read battery voltage
             double batteryVoltage = kdcanProtocol.readBatteryVoltage();
-
-            // Determine protocol
             String protocol = usbManager.getCurrentProtocol();
 
-            // Build diagnostics
             JSObject diagnostics = new JSObject();
             diagnostics.put("cableDetectTime", kdcanProtocol.getCableDetectTime());
             diagnostics.put("protocolNegotiateTime", kdcanProtocol.getProtocolNegotiateTime());
@@ -151,9 +139,6 @@ public class OBD2BridgePlugin extends Plugin {
         }
     }
 
-    /**
-     * Disconnect from vehicle and close USB port.
-     */
     @PluginMethod
     public void disconnect(PluginCall call) {
         try {
@@ -167,10 +152,8 @@ public class OBD2BridgePlugin extends Plugin {
         }
     }
 
-    /**
-     * Read live OBD2 data from all PIDs.
-     * Returns real sensor values from the vehicle.
-     */
+    // ==================== LIVE DATA ====================
+
     @PluginMethod
     public void readLiveData(PluginCall call) {
         JSObject result = new JSObject();
@@ -182,22 +165,17 @@ public class OBD2BridgePlugin extends Plugin {
             }
 
             Map<String, Double> liveData = kdcanProtocol.readAllLiveData();
-
             for (Map.Entry<String, Double> entry : liveData.entrySet()) {
                 result.put(entry.getKey(), entry.getValue());
             }
             result.put("connected", true);
             result.put("timestamp", System.currentTimeMillis());
-
             call.resolve(result);
         } catch (Exception e) {
             call.reject("READ_ERROR", "Failed to read live data: " + e.getMessage(), e);
         }
     }
 
-    /**
-     * Read a single PID value.
-     */
     @PluginMethod
     public void readPID(PluginCall call) {
         String pid = call.getString("pid", "");
@@ -218,9 +196,8 @@ public class OBD2BridgePlugin extends Plugin {
         }
     }
 
-    /**
-     * Read DME information (ECU type, software version, VIN).
-     */
+    // ==================== DME OPERATIONS ====================
+
     @PluginMethod
     public void readDMEInfo(PluginCall call) {
         try {
@@ -237,9 +214,29 @@ public class OBD2BridgePlugin extends Plugin {
         }
     }
 
-    /**
-     * Start a flash session.
-     */
+    @PluginMethod
+    public void writeDMEParameter(PluginCall call) {
+        String parameter = call.getString("parameter", "");
+        double value = call.getDouble("value", 0.0);
+        if (parameter.isEmpty()) {
+            call.reject("INVALID_PARAM", "Parameter name is required");
+            return;
+        }
+
+        try {
+            boolean success = kdcanProtocol.writeDMEParameter(parameter, value);
+            JSObject result = new JSObject();
+            result.put("success", success);
+            result.put("parameter", parameter);
+            result.put("value", value);
+            call.resolve(result);
+        } catch (Exception e) {
+            call.reject("WRITE_ERROR", "Failed to write parameter: " + e.getMessage(), e);
+        }
+    }
+
+    // ==================== FLASHING ====================
+
     @PluginMethod
     public void startFlash(PluginCall call) {
         boolean isLiveFlash = call.getBoolean("isLiveFlash", false);
@@ -252,10 +249,6 @@ public class OBD2BridgePlugin extends Plugin {
         }
     }
 
-    /**
-     * Execute the flash sequence.
-     * Reports real progress via event emitter.
-     */
     @PluginMethod
     public void executeFlash(PluginCall call) {
         try {
@@ -296,9 +289,6 @@ public class OBD2BridgePlugin extends Plugin {
         }
     }
 
-    /**
-     * Quick flash - write only calibration data.
-     */
     @PluginMethod
     public void quickFlash(PluginCall call) {
         try {
@@ -310,9 +300,6 @@ public class OBD2BridgePlugin extends Plugin {
         }
     }
 
-    /**
-     * Abort current flash.
-     */
     @PluginMethod
     public void abortFlash(PluginCall call) {
         try {
@@ -325,9 +312,8 @@ public class OBD2BridgePlugin extends Plugin {
         }
     }
 
-    /**
-     * Send CAN bus commands (for gamepad control).
-     */
+    // ==================== CAN BUS ====================
+
     @PluginMethod
     public void sendCANCommands(PluginCall call) {
         JSArray commands = call.getArray("commands", new JSArray());
@@ -352,33 +338,167 @@ public class OBD2BridgePlugin extends Plugin {
         }
     }
 
-    /**
-     * Write a single DME parameter (for AI tuning adjustments).
-     */
+    // ==================== FLASH BACKUP / RESTORE ====================
+
     @PluginMethod
-    public void writeDMEParameter(PluginCall call) {
-        String parameter = call.getString("parameter", "");
-        double value = call.getDouble("value", 0.0);
-        if (parameter.isEmpty()) {
-            call.reject("INVALID_PARAM", "Parameter name is required");
+    public void backupDME(PluginCall call) {
+        if (!kdcanProtocol.isConnected()) {
+            JSObject result = new JSObject();
+            result.put("success", false);
+            result.put("error", "Not connected to vehicle");
+            call.resolve(result);
+            return;
+        }
+
+        new Thread(() -> {
+            try {
+                JSONObject backupResult = dmeBackupService.backupDME(kdcanProtocol, new DMEBackupService.BackupProgressCallback() {
+                    @Override
+                    public void onProgress(int progress, String currentSector) {
+                        JSObject data = new JSObject();
+                        data.put("progress", progress);
+                        data.put("currentSector", currentSector);
+                        notifyListeners("backupProgress", data);
+                    }
+                });
+
+                JSObject result = convertJsonObjectToJSObject(backupResult);
+                call.resolve(result);
+            } catch (Exception e) {
+                JSObject result = new JSObject();
+                result.put("success", false);
+                result.put("error", e.getMessage());
+                call.resolve(result);
+            }
+        }).start();
+    }
+
+    @PluginMethod
+    public void restoreDME(PluginCall call) {
+        String backupId = call.getString("backupId", "");
+        if (!kdcanProtocol.isConnected()) {
+            JSObject result = new JSObject();
+            result.put("success", false);
+            result.put("sectorsRestored", 0);
+            result.put("sectorsTotal", 0);
+            result.put("error", "Not connected to vehicle");
+            call.resolve(result);
+            return;
+        }
+
+        new Thread(() -> {
+            try {
+                JSONObject restoreResult = dmeBackupService.restoreDME(kdcanProtocol, backupId, new DMEBackupService.BackupProgressCallback() {
+                    @Override
+                    public void onProgress(int progress, String currentSector) {
+                        JSObject data = new JSObject();
+                        data.put("progress", progress);
+                        data.put("currentSector", currentSector);
+                        notifyListeners("backupProgress", data);
+                    }
+                });
+
+                JSObject result = new JSObject();
+                result.put("success", restoreResult.optBoolean("success", false));
+                result.put("sectorsRestored", restoreResult.optInt("sectorsRestored", 0));
+                result.put("sectorsTotal", restoreResult.optInt("sectorsTotal", 0));
+                if (restoreResult.has("error")) {
+                    result.put("error", restoreResult.getString("error"));
+                }
+                call.resolve(result);
+            } catch (Exception e) {
+                JSObject result = new JSObject();
+                result.put("success", false);
+                result.put("sectorsRestored", 0);
+                result.put("sectorsTotal", 0);
+                result.put("error", e.getMessage());
+                call.resolve(result);
+            }
+        }).start();
+    }
+
+    // ==================== DIAGNOSTIC TROUBLE CODES ====================
+
+    @PluginMethod
+    public void readDTCs(PluginCall call) {
+        JSObject result = new JSObject();
+        JSONArray readings = new JSONArray();
+
+        if (!kdcanProtocol.isConnected()) {
+            result.put("readings", readings);
+            call.resolve(result);
             return;
         }
 
         try {
-            boolean success = kdcanProtocol.writeDMEParameter(parameter, value);
-            JSObject result = new JSObject();
-            result.put("success", success);
-            result.put("parameter", parameter);
-            result.put("value", value);
-            call.resolve(result);
+            List<KDCANProtocol.ECUInfo> ecus = kdcanProtocol.scanECUs();
+            for (KDCANProtocol.ECUInfo ecu : ecus) {
+                if (!"online".equals(ecu.status)) continue;
+
+                JSONObject dtcResult = kdcanProtocol.readDTCsForECU(ecu.address);
+                JSONObject reading = new JSONObject();
+                reading.put("ecuName", ecu.name);
+                reading.put("ecuAddress", ecu.address);
+
+                JSONArray codes = new JSONArray();
+                if (dtcResult.has("codes")) {
+                    JSONArray dtcArray = dtcResult.getJSONArray("codes");
+                    for (int i = 0; i < dtcArray.length(); i++) {
+                        JSONObject code = dtcArray.getJSONObject(i);
+                        String dtcCode = code.optString("code", "");
+                        code.put("description", DTCDatabase.getDescription(dtcCode));
+                        codes.put(code);
+                    }
+                }
+                reading.put("codes", codes);
+                readings.put(reading);
+            }
         } catch (Exception e) {
-            call.reject("WRITE_ERROR", "Failed to write parameter: " + e.getMessage(), e);
+            android.util.Log.e("OBD2Bridge", "Read DTCs error", e);
         }
+
+        result.put("readings", readings);
+        call.resolve(result);
     }
 
-    /**
-     * Get current connection state.
-     */
+    @PluginMethod
+    public void clearDTCs(PluginCall call) {
+        String ecuAddress = call.getString("ecuAddress", null);
+        JSObject result = new JSObject();
+        int cleared = 0;
+
+        if (!kdcanProtocol.isConnected()) {
+            result.put("success", false);
+            result.put("cleared", 0);
+            call.resolve(result);
+            return;
+        }
+
+        try {
+            if (ecuAddress != null && !ecuAddress.isEmpty()) {
+                boolean success = kdcanProtocol.clearDTCs(ecuAddress);
+                if (success) cleared++;
+            } else {
+                List<KDCANProtocol.ECUInfo> ecus = kdcanProtocol.scanECUs();
+                for (KDCANProtocol.ECUInfo ecu : ecus) {
+                    if ("online".equals(ecu.status)) {
+                        boolean success = kdcanProtocol.clearDTCs(ecu.address);
+                        if (success) cleared++;
+                    }
+                }
+            }
+            result.put("success", cleared > 0);
+            result.put("cleared", cleared);
+        } catch (Exception e) {
+            result.put("success", false);
+            result.put("cleared", cleared);
+        }
+
+        call.resolve(result);
+    }
+
+    // ==================== CONNECTION STATE ====================
+
     @PluginMethod
     public void getConnectionState(PluginCall call) {
         JSObject result = new JSObject();
@@ -387,9 +507,8 @@ public class OBD2BridgePlugin extends Plugin {
         call.resolve(result);
     }
 
-    /**
-     * Helper method to convert JSONObject to JSObject.
-     */
+    // ==================== PRIVATE HELPERS ====================
+
     private JSObject convertJsonObjectToJSObject(JSONObject json) throws JSONException {
         JSObject result = new JSObject();
         if (json != null) {
