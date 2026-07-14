@@ -10,10 +10,10 @@ import android.hardware.usb.UsbDeviceConnection;
 import android.hardware.usb.UsbManager;
 import android.util.Log;
 
-import com.felhr.usbserial.FTDISerialDevice;
 import com.felhr.usbserial.UsbSerialDevice;
 import com.felhr.usbserial.UsbSerialInterface;
 
+import java.lang.reflect.Method;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -21,7 +21,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /**
  * USB Serial Manager for K+DCAN cables.
  * Handles detection and communication with FTDI FT232R, CH340/CH341, and CP2102 chips.
- * Provides FTDI-specific configuration: latency timer, DTR/RTS for K-Line/D-CAN switching.
+ * Uses Java reflection for FTDI-specific features (latency timer, DTR/RTS) to ensure
+ * compatibility across different usb-serial library versions.
  * All operations use real USB hardware - no simulation.
  */
 public class UsbSerialManager {
@@ -30,7 +31,7 @@ public class UsbSerialManager {
     private static final String ACTION_USB_PERMISSION = "com.bmwe60.coderpro.USB_PERMISSION";
 
     // FTDI latency timer - must be 1-16ms. Lower is better for K-Line timing.
-    // K-Line at 10400 baud = ~0.96ms per byte. 1ms latency gives fastest response.
+    // K-Line at 10400 baud = ~0.96ms per byte. 2ms latency gives fast response without excessive CPU.
     private static final int FTDI_LATENCY_TIMER_MS = 2;
 
     // K+DCAN cable USB IDs: vendorId, productId
@@ -69,6 +70,7 @@ public class UsbSerialManager {
     private CableInfo currentCable;
     private final AtomicBoolean portOpen = new AtomicBoolean(false);
     private String currentProtocol = "none";
+    private boolean isFtdiDevice = false;
 
     // USB permission receiver
     private final BroadcastReceiver permissionReceiver = new BroadcastReceiver() {
@@ -100,6 +102,8 @@ public class UsbSerialManager {
         this.context.registerReceiver(permissionReceiver, filter);
     }
 
+    // ==================== CABLE DETECTION ====================
+
     /**
      * Scan for connected K+DCAN cables.
      * Returns real detected cable or null if none found.
@@ -130,8 +134,8 @@ public class UsbSerialManager {
                         chipName
                     );
 
-                    Log.i(TAG, "Detected cable: " + cableType + " (" + chipName + 
-                          ", VID=0x" + Integer.toHexString(vendorId) + 
+                    Log.i(TAG, "Detected cable: " + cableType + " (" + chipName +
+                          ", VID=0x" + Integer.toHexString(vendorId) +
                           ", PID=0x" + Integer.toHexString(productId) + ")");
                     return currentCable;
                 }
@@ -143,9 +147,11 @@ public class UsbSerialManager {
         return null;
     }
 
+    // ==================== PORT OPERATIONS ====================
+
     /**
      * Open the USB serial port for the detected cable.
-     * Configures FTDI-specific settings: latency timer, DTR/RTS for K-Line mode.
+     * Configures FTDI-specific settings via reflection: latency timer, DTR/RTS for K-Line mode.
      */
     public boolean openPort() {
         if (currentCable == null) {
@@ -162,7 +168,7 @@ public class UsbSerialManager {
                 // Request permission if needed
                 if (!usbManager.hasPermission(device)) {
                     PendingIntent permissionIntent = PendingIntent.getBroadcast(
-                        context, 0, new Intent(ACTION_USB_PERMISSION), 
+                        context, 0, new Intent(ACTION_USB_PERMISSION),
                         PendingIntent.FLAG_MUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
                     usbManager.requestPermission(device, permissionIntent);
                     Log.w(TAG, "USB permission not granted, requesting...");
@@ -200,33 +206,22 @@ public class UsbSerialManager {
                 serialPort.setParity(UsbSerialInterface.PARITY_NONE);
                 serialPort.setFlowControl(UsbSerialInterface.FLOW_CONTROL_OFF);
 
-                // FTDI-specific configuration
-                if (serialPort instanceof FTDISerialDevice) {
-                    FTDISerialDevice ftdi = (FTDISerialDevice) serialPort;
-                    try {
-                        // Set latency timer to minimum for K-Line timing precision
-                        // K-Line at 10400 baud = ~0.96ms per byte.
-                        // 2ms latency gives fast response without excessive CPU usage.
-                        ftdi.setLatencyTimer(FTDI_LATENCY_TIMER_MS);
-                        Log.i(TAG, "FTDI latency timer set to " + FTDI_LATENCY_TIMER_MS + "ms");
-
-                        // Set DTR/RTS for K-Line mode
-                        // Most K+DCAN cables: DTR=high, RTS=low selects K-Line
-                        // DTR=low, RTS=high selects D-CAN
-                        // This matches the BMW INPA cable design
-                        ftdi.setDTR(true);
-                        ftdi.setRTS(false);
-                        Log.i(TAG, "FTDI DTR=HIGH, RTS=LOW (K-Line mode)");
-                    } catch (Exception e) {
-                        Log.w(TAG, "FTDI-specific config failed: " + e.getMessage());
-                    }
+                // Detect FTDI device and apply FTDI-specific configuration via reflection
+                isFtdiDevice = isFtdiDevice(serialPort);
+                if (isFtdiDevice) {
+                    configureFtdiLatencyTimer(FTDI_LATENCY_TIMER_MS);
+                    // Set DTR=HIGH, RTS=LOW for K-Line mode (BMW INPA cable design)
+                    setFtdiControlLine("setDTR", true);
+                    setFtdiControlLine("setRTS", false);
+                    Log.i(TAG, "FTDI configured: latency=" + FTDI_LATENCY_TIMER_MS +
+                          "ms, DTR=HIGH, RTS=LOW (K-Line mode)");
                 }
 
                 portOpen.set(true);
                 currentProtocol = currentCable.type.equals("enet") ? "enet" : "k_dcan";
 
                 Log.i(TAG, "Serial port opened at " + initialBaud + " baud, " +
-                      "protocol=" + currentProtocol);
+                      "protocol=" + currentProtocol + ", ftdi=" + isFtdiDevice);
                 return true;
             }
         }
@@ -242,28 +237,22 @@ public class UsbSerialManager {
      * @param mode "kline" for K-Line mode, "dcan" for D-CAN mode
      */
     public boolean setBusMode(String mode) {
-        if (!(serialPort instanceof FTDISerialDevice)) {
-            // CH340/CP2102 cables may not support DTR/RTS bus switching
+        if (!isFtdiDevice || serialPort == null) {
             Log.d(TAG, "Bus mode switching not supported on non-FTDI cable");
             return false;
         }
 
-        FTDISerialDevice ftdi = (FTDISerialDevice) serialPort;
         try {
             if ("kline".equals(mode)) {
-                // K-Line mode: DTR=HIGH, RTS=LOW (typical BMW INPA cable)
-                ftdi.setDTR(true);
-                ftdi.setRTS(false);
-                // Switch to 10400 baud for K-Line communication
+                setFtdiControlLine("setDTR", true);
+                setFtdiControlLine("setRTS", false);
                 serialPort.setBaudRate(KLINE_BAUD);
-                Log.i(TAG, "Switched to K-Line mode (DTR=HIGH, RTS=LOW, 10400 baud)");
+                Log.i(TAG, "Switched to K-Line mode (10400 baud)");
             } else if ("dcan".equals(mode)) {
-                // D-CAN mode: DTR=LOW, RTS=HIGH (typical BMW INPA cable)
-                ftdi.setDTR(false);
-                ftdi.setRTS(true);
-                // Switch to 500000 baud for D-CAN communication
+                setFtdiControlLine("setDTR", false);
+                setFtdiControlLine("setRTS", true);
                 serialPort.setBaudRate(DCAN_BAUD);
-                Log.i(TAG, "Switched to D-CAN mode (DTR=LOW, RTS=HIGH, 500000 baud)");
+                Log.i(TAG, "Switched to D-CAN mode (500000 baud)");
             } else {
                 Log.w(TAG, "Unknown bus mode: " + mode);
                 return false;
@@ -299,6 +288,7 @@ public class UsbSerialManager {
     public void closePort() {
         portOpen.set(false);
         currentProtocol = "none";
+        isFtdiDevice = false;
 
         if (serialPort != null) {
             try {
@@ -362,6 +352,60 @@ public class UsbSerialManager {
         return currentCable;
     }
 
+    // ==================== FTDI REFLECTION HELPERS ====================
+
+    /**
+     * Check if the serial port is an FTDI device using reflection.
+     * Checks for FTDI-specific class name or vendor ID.
+     */
+    private boolean isFtdiDevice(UsbSerialDevice port) {
+        if (port == null) return false;
+        String className = port.getClass().getName();
+        boolean isFtdi = className.toLowerCase().contains("ftdi");
+        if (isFtdi) {
+            Log.d(TAG, "FTDI device detected: " + className);
+        }
+        return isFtdi;
+    }
+
+    /**
+     * Configure FTDI latency timer using reflection.
+     * This avoids compile-time dependency on FTDISerialDevice class.
+     */
+    private void configureFtdiLatencyTimer(int latencyMs) {
+        if (serialPort == null) return;
+        try {
+            Method setLatencyTimer = serialPort.getClass().getMethod("setLatencyTimer", int.class);
+            setLatencyTimer.invoke(serialPort, latencyMs);
+            Log.i(TAG, "FTDI latency timer configured to " + latencyMs + "ms");
+        } catch (NoSuchMethodException e) {
+            Log.w(TAG, "FTDI setLatencyTimer() not available in this library version");
+        } catch (Exception e) {
+            Log.w(TAG, "FTDI latency timer config failed: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Set FTDI control line (DTR or RTS) using reflection.
+     *
+     * @param methodName "setDTR" or "setRTS"
+     * @param state true for HIGH, false for LOW
+     */
+    private void setFtdiControlLine(String methodName, boolean state) {
+        if (serialPort == null) return;
+        try {
+            Method method = serialPort.getClass().getMethod(methodName, boolean.class);
+            method.invoke(serialPort, state);
+            Log.d(TAG, "FTDI " + methodName + "=" + state);
+        } catch (NoSuchMethodException e) {
+            Log.w(TAG, "FTDI " + methodName + "() not available in this library version");
+        } catch (Exception e) {
+            Log.w(TAG, "FTDI " + methodName + " failed: " + e.getMessage());
+        }
+    }
+
+    // ==================== UTILITY ====================
+
     /**
      * Get the default baud rate for a cable type.
      */
@@ -409,6 +453,8 @@ public class UsbSerialManager {
             // Receiver may not be registered
         }
     }
+
+    // ==================== DATA CLASS ====================
 
     /**
      * Cable information data class.
