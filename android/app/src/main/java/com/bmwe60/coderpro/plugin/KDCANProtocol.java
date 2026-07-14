@@ -7,8 +7,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -41,7 +39,7 @@ public class KDCANProtocol {
     // KWP2000 Service IDs (K-Line)
     private static final byte KWP_START_COMMUNICATION = (byte) 0x81;
     private static final byte KWP_STOP_COMMUNICATION = (byte) 0x82;
-    private static final byte KWP TesterPresent = (byte) 0x3E;
+    private static final byte KWP_TESTER_PRESENT = (byte) 0x3E;
     private static final byte KWP_READ_ECU_IDENTIFICATION = (byte) 0x1A;
     private static final byte KWP_READ_DATA_BY_LOCAL_ID = (byte) 0x21;
 
@@ -92,7 +90,7 @@ public class KDCANProtocol {
     private long connectStartTime = 0;
     private String dmeProtocolVersion = "";
 
-    // Response handling using CountDownLatch to avoid wait/notify race conditions
+    // Response handling using AtomicReference for thread safety
     private final AtomicReference<byte[]> lastResponse = new AtomicReference<>();
     private final Object responseLock = new Object();
 
@@ -605,8 +603,8 @@ public class KDCANProtocol {
     // ==================== RESPONSE HANDLING ====================
 
     /**
-     * Send data and wait for response using CountDownLatch to avoid race conditions.
-     * Uses a timeout mechanism that handles the case where response arrives before wait begins.
+     * Send data and wait for response.
+     * Uses synchronized/wait for response notification from USB read callback.
      */
     private byte[] sendAndWait(byte[] data, int timeoutMs) {
         if (serialPort == null) return null;
@@ -616,7 +614,6 @@ public class KDCANProtocol {
             serialPort.write(data);
 
             try {
-                // Wait for response with timeout
                 responseLock.wait(timeoutMs);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
@@ -638,14 +635,14 @@ public class KDCANProtocol {
             try {
                 long deadline = System.currentTimeMillis() + timeoutMs;
                 while (System.currentTimeMillis() < deadline) {
-                    responseLock.wait(Math.max(1, deadline - System.currentTimeMillis()));
+                    long remaining = deadline - System.currentTimeMillis();
+                    if (remaining <= 0) break;
+                    responseLock.wait(remaining);
                     byte[] resp = lastResponse.getAndSet(null);
                     if (resp != null && resp.length >= byteCount) {
                         return resp;
                     }
                     if (resp != null) {
-                        // Got partial response, accumulate
-                        // For simplicity, return what we have
                         return resp;
                     }
                 }
@@ -817,7 +814,7 @@ public class KDCANProtocol {
                     if (connected.get() && serialPort != null) {
                         if (dmeProtocolVersion.contains("KWP2000")) {
                             // KWP2000 TesterPresent
-                            byte[] tp = buildKWPFrame(KWP TesterPresent, new byte[]{0x00});
+                            byte[] tp = buildKWPFrame(KWP_TESTER_PRESENT, new byte[]{0x00});
                             serialPort.write(tp);
                         } else {
                             // UDS TesterPresent
