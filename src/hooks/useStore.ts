@@ -36,6 +36,17 @@ interface AppState {
   setIsLogging: (v: boolean) => void;
   obd2ConnectionPaused: boolean;
   setObd2ConnectionPaused: (v: boolean) => void;
+  // Connection watchdog + auto-recovery
+  watchdogEnabled: boolean;
+  setWatchdogEnabled: (v: boolean) => void;
+  lastHeartbeat: number;
+  setLastHeartbeat: (t: number) => void;
+  connectionDead: boolean;
+  setConnectionDead: (v: boolean) => void;
+  autoReconnectAttempts: number;
+  maxAutoReconnectAttempts: number;
+  incrementAutoReconnectAttempts: () => void;
+  resetAutoReconnectAttempts: () => void;
   logSessions: LogSession[];
   currentSession: LogSession | null;
   startSession: (name: string) => void;
@@ -161,6 +172,17 @@ export const useStore = create<AppState>((set, get) => ({
   setIsLogging: (v) => set({ isLogging: v }),
   obd2ConnectionPaused: false,
   setObd2ConnectionPaused: (v) => set({ obd2ConnectionPaused: v }),
+  // Connection watchdog + auto-recovery
+  watchdogEnabled: true,
+  setWatchdogEnabled: (v) => set({ watchdogEnabled: v }),
+  lastHeartbeat: 0,
+  setLastHeartbeat: (t) => set({ lastHeartbeat: t }),
+  connectionDead: false,
+  setConnectionDead: (v) => set({ connectionDead: v }),
+  autoReconnectAttempts: 0,
+  maxAutoReconnectAttempts: 5,
+  incrementAutoReconnectAttempts: () => set((s) => ({ autoReconnectAttempts: s.autoReconnectAttempts + 1 })),
+  resetAutoReconnectAttempts: () => set({ autoReconnectAttempts: 0 }),
   logSessions: [],
   currentSession: null,
   startSession: (name) => {
