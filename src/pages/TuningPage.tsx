@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
 import { useStore } from '@/hooks/useStore';
 import { aiTuningEngine } from '@/lib/aiTuningEngine';
+import { LiveTuningPanel } from '@/components/LiveTuningPanel';
 import { ENGINE_SPECS, getInjectorsForEngine, calculateMaxHp, calculateRequiredInjectorCc } from '@/lib/engineData';
 import {
   Cpu, Zap, Fuel, Gauge, Sparkles, AlertTriangle,
-  Check, Info, TrendingUp
+  Check, Info, TrendingUp, Activity
 } from 'lucide-react';
 import type { MapType, InjectorType } from '@/types';
 
@@ -22,7 +23,7 @@ const MAP_TYPES: { id: MapType; name: string; desc: string; color: string }[] = 
 
 export const TuningPage: React.FC = () => {
   const { profile, currentMap, updateProfile, generateMap } = useStore();
-  const [activeTab, setActiveTab] = useState<'maps' | 'injectors' | 'timing' | 'boost' | 'throttle'>('maps');
+  const [activeTab, setActiveTab] = useState<'maps' | 'injectors' | 'timing' | 'boost' | 'throttle' | 'live'>('maps');
   const [targetHp, setTargetHp] = useState(400);
   const [showInjectorCalc, setShowInjectorCalc] = useState(false);
 
@@ -47,7 +48,12 @@ export const TuningPage: React.FC = () => {
     { id: 'timing', label: 'Timing', icon: Zap },
     { id: 'boost', label: 'Boost', icon: TrendingUp },
     { id: 'throttle', label: 'Throttle', icon: Gauge },
+    { id: 'live', label: 'Live Tune', icon: Activity },
   ];
+
+  if (activeTab === 'live') {
+    return <LiveTuningPanel />;
+  }
 
   return (
     <div className="flex flex-col h-full bg-[#0a0a0a]">
@@ -211,19 +217,18 @@ export const TuningPage: React.FC = () => {
                   </div>
                 </div>
 
-                {/* VANOS Summary */}
                 {currentMap.vanosIntake.length > 0 && (
                   <div className="grid grid-cols-2 gap-3">
                     <div className="bg-[#161b22] rounded-lg p-3">
                       <div className="text-gray-500 text-xs mb-1">VANOS Intake (max)</div>
                       <div className="text-white font-mono">
-                        {Math.max(...currentMap.vanosIntake.map(v => v.advance))}° advance
+                        {Math.max(...currentMap.vanosIntake.map(v => v.advance))} deg advance
                       </div>
                     </div>
                     <div className="bg-[#161b22] rounded-lg p-3">
                       <div className="text-gray-500 text-xs mb-1">VANOS Exhaust (max)</div>
                       <div className="text-white font-mono">
-                        {Math.max(...currentMap.vanosExhaust.map(v => v.advance))}° advance
+                        {Math.max(...currentMap.vanosExhaust.map(v => v.advance))} deg advance
                       </div>
                     </div>
                   </div>
@@ -235,7 +240,6 @@ export const TuningPage: React.FC = () => {
 
         {activeTab === 'injectors' && (
           <div className="space-y-4">
-            {/* Injector Calculator */}
             <div className="bg-[#0d1117] rounded-xl p-4 border border-gray-800">
               <div className="flex items-center justify-between mb-3">
                 <h3 className="font-semibold text-white flex items-center gap-2">
@@ -296,7 +300,6 @@ export const TuningPage: React.FC = () => {
               )}
             </div>
 
-            {/* Injector List */}
             <div className="space-y-2">
               {availableInjectors.map(injector => {
                 const isActive = profile.injector === injector.id;
@@ -364,7 +367,7 @@ export const TuningPage: React.FC = () => {
                                 <span className={`font-mono ${
                                   entry.knockRetard > 0 ? 'text-red-400' : 'text-white'
                                 }`}>
-                                  {entry.ignitionAdvance.toFixed(1)}°
+                                  {entry.ignitionAdvance.toFixed(1)} deg
                                 </span>
                               ) : '-'}
                             </td>
@@ -377,7 +380,6 @@ export const TuningPage: React.FC = () => {
               </div>
             </div>
 
-            {/* Timing Chart Preview */}
             <div className="bg-[#0d1117] rounded-xl p-4 border border-gray-800">
               <h3 className="font-semibold text-white mb-3">Timing by RPM @ 80% Load</h3>
               <div className="flex items-end gap-1 h-32">
@@ -428,7 +430,6 @@ export const TuningPage: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Gear-based boost */}
                 {currentMap.gearBasedBoost && (
                   <div className="bg-[#0d1117] rounded-xl p-4 border border-gray-800">
                     <h3 className="font-semibold text-white mb-3">Gear-Based Boost</h3>
@@ -473,7 +474,6 @@ export const TuningPage: React.FC = () => {
               </div>
             </div>
 
-            {/* Throttle map table */}
             <div className="bg-[#0d1117] rounded-xl p-4 border border-gray-800">
               <h3 className="font-semibold text-white mb-3">Throttle Response Table</h3>
               <div className="grid grid-cols-5 gap-2">
