@@ -3,7 +3,7 @@ import { useStore } from '@/hooks/useStore';
 import { testConnection, chat } from '@/lib/geminiAiService';
 import {
   Brain, AlertTriangle, CheckCircle, Info, Zap, Fuel,
-  Gauge, Settings, TrendingUp, Shield, Play, Sparkles,
+  Gauge, Settings, TrendingUp, Shield, Sparkles,
   Wifi, WifiOff, Loader, Send, MessageSquare,
   RefreshCw, X, User, Bot
 } from 'lucide-react';
