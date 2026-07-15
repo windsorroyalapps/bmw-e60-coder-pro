@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { TuningProfile, EngineType, OBD2Data, LogEntry, FlashBackup } from '@/types';
+import type { TuningProfile, EngineType, OBD2Data, LogEntry, FlashBackup, LogSession, GaugeLayout } from '@/types';
 import type { OBD2State, CableInfo, FlashSession } from '@/lib/obd2Connection';
 import { aiTuningEngine } from '@/lib/aiTuningEngine';
 import type { AdapterConfig } from '@/components/OBDAdapterSettings';
@@ -10,29 +10,31 @@ interface AppState {
   // Navigation
   activeScreen: string;
   setActiveScreen: (screen: string) => void;
-  
+
   // OBD2
   obd2: OBD2State;
   setObd2: (state: OBD2State) => void;
   obd2Cable: CableInfo | null;
   setObd2Cable: (cable: CableInfo | null) => void;
-  
+
   // Profile
   profile: TuningProfile;
   setProfile: (profile: TuningProfile) => void;
-  
+
   // Live Data
   liveData: OBD2Data;
   updateLiveData: (data: Partial<OBD2Data>) => void;
-  
+
   // Logging
   isLogging: boolean;
   setIsLogging: (logging: boolean) => void;
   logEntries: LogEntry[];
   addLogEntry: (entry: Omit<LogEntry, 'id'>) => void;
-  currentSession: string | null;
-  setCurrentSession: (session: string | null) => void;
-  
+  currentSession: LogSession | null;
+  setCurrentSession: (session: LogSession | null) => void;
+  startSession: (name: string) => void;
+  stopSession: () => void;
+
   // Flash
   showFlashModal: boolean;
   setShowFlashModal: (show: boolean) => void;
@@ -40,17 +42,22 @@ interface AppState {
   setFlashSession: (session: FlashSession | null) => void;
   flashBackups: FlashBackup[];
   addFlashBackup: (backup: FlashBackup) => void;
-  
+
   // Quick Switch
   showQuickSwitch: boolean;
   setShowQuickSwitch: (show: boolean) => void;
-  
+
+  // Gauge Layouts
+  gaugeLayouts: GaugeLayout[];
+  activeGaugeLayout: string;
+  setActiveGaugeLayout: (id: string) => void;
+
   // AI Tuning
   aiRecommendations: ReturnType<typeof aiTuningEngine.analyze>;
   setAiRecommendations: (recs: ReturnType<typeof aiTuningEngine.analyze>) => void;
   aiChatOpen: boolean;
   setAiChatOpen: (open: boolean) => void;
-  
+
   // Watchdog
   watchdogEnabled: boolean;
   setWatchdogEnabled: (enabled: boolean) => void;
@@ -61,7 +68,7 @@ interface AppState {
   maxAutoReconnectAttempts: number;
   obd2ConnectionPaused: boolean;
   setObd2ConnectionPaused: (paused: boolean) => void;
-  
+
   // Notifications
   notifications: { id: string; message: string; type: 'info' | 'success' | 'warning' | 'error' }[];
   addNotification: (n: Omit<AppState['notifications'][0], 'id'>) => void;
@@ -92,11 +99,42 @@ interface AppState {
   updateAdapterConfig: (id: string, config: Partial<AdapterConfig>) => void;
 }
 
+const DEFAULT_GAUGE_LAYOUTS: GaugeLayout[] = [
+  {
+    id: 'default',
+    name: 'Default',
+    isDefault: true,
+    gauges: [
+      { id: 'g1', type: 'rpm', position: { x: 0, y: 0, w: 6, h: 2 }, min: 0, max: 8000, warningThreshold: 6500, dangerThreshold: 7200, unit: 'RPM', label: 'Engine Speed' },
+      { id: 'g2', type: 'boost', position: { x: 6, y: 0, w: 6, h: 2 }, min: -1, max: 2.5, warningThreshold: 1.8, dangerThreshold: 2.2, unit: 'bar', label: 'Boost' },
+      { id: 'g3', type: 'afr', position: { x: 0, y: 2, w: 4, h: 2 }, min: 0.7, max: 1.3, warningThreshold: 1.1, dangerThreshold: 1.2, unit: 'lambda', label: 'AFR' },
+      { id: 'g4', type: 'iat', position: { x: 4, y: 2, w: 4, h: 2 }, min: 0, max: 80, warningThreshold: 55, dangerThreshold: 65, unit: 'C', label: 'IAT' },
+      { id: 'g5', type: 'coolant_temp', position: { x: 8, y: 2, w: 4, h: 2 }, min: 60, max: 130, warningThreshold: 105, dangerThreshold: 115, unit: 'C', label: 'Coolant' },
+      { id: 'g6', type: 'throttle', position: { x: 0, y: 4, w: 3, h: 2 }, min: 0, max: 100, warningThreshold: 80, dangerThreshold: 95, unit: '%', label: 'Throttle' },
+      { id: 'g7', type: 'load', position: { x: 3, y: 4, w: 3, h: 2 }, min: 0, max: 100, warningThreshold: 80, dangerThreshold: 95, unit: '%', label: 'Load' },
+      { id: 'g8', type: 'timing', position: { x: 6, y: 4, w: 3, h: 2 }, min: -10, max: 40, warningThreshold: 30, dangerThreshold: 35, unit: 'deg', label: 'Timing' },
+      { id: 'g9', type: 'battery', position: { x: 9, y: 4, w: 3, h: 2 }, min: 10, max: 16, warningThreshold: 12.5, dangerThreshold: 12.0, unit: 'V', label: 'Battery' },
+    ],
+  },
+  {
+    id: 'compact',
+    name: 'Compact',
+    isDefault: false,
+    gauges: [
+      { id: 'c1', type: 'rpm', position: { x: 0, y: 0, w: 4, h: 2 }, min: 0, max: 8000, warningThreshold: 6500, dangerThreshold: 7200, unit: 'RPM', label: 'RPM' },
+      { id: 'c2', type: 'boost', position: { x: 4, y: 0, w: 4, h: 2 }, min: -1, max: 2.5, warningThreshold: 1.8, dangerThreshold: 2.2, unit: 'bar', label: 'Boost' },
+      { id: 'c3', type: 'afr', position: { x: 8, y: 0, w: 4, h: 2 }, min: 0.7, max: 1.3, warningThreshold: 1.1, dangerThreshold: 1.2, unit: 'lambda', label: 'AFR' },
+      { id: 'c4', type: 'coolant_temp', position: { x: 0, y: 2, w: 6, h: 2 }, min: 60, max: 130, warningThreshold: 105, dangerThreshold: 115, unit: 'C', label: 'Coolant' },
+      { id: 'c5', type: 'iat', position: { x: 6, y: 2, w: 6, h: 2 }, min: 0, max: 80, warningThreshold: 55, dangerThreshold: 65, unit: 'C', label: 'IAT' },
+    ],
+  },
+];
+
 export const useStore = create<AppState>((set, get) => ({
   // Navigation
   activeScreen: 'home',
   setActiveScreen: (screen) => set({ activeScreen: screen }),
-  
+
   // OBD2
   obd2: {
     connectionState: 'disconnected',
@@ -117,7 +155,7 @@ export const useStore = create<AppState>((set, get) => ({
   setObd2: (state) => set({ obd2: state }),
   obd2Cable: null,
   setObd2Cable: (cable) => set({ obd2Cable: cable }),
-  
+
   // Profile
   profile: {
     year: '2008',
@@ -133,7 +171,7 @@ export const useStore = create<AppState>((set, get) => ({
     hasMethInjection: false,
   },
   setProfile: (profile) => set({ profile }),
-  
+
   // Live Data
   liveData: {
     rpm: 0,
@@ -153,17 +191,44 @@ export const useStore = create<AppState>((set, get) => ({
     batteryVoltage: 12.6,
   },
   updateLiveData: (data) => set((s) => ({ liveData: { ...s.liveData, ...data } })),
-  
+
   // Logging
   isLogging: false,
   setIsLogging: (logging) => set({ isLogging: logging }),
   logEntries: [],
-  addLogEntry: (entry) => set((s) => ({ 
-    logEntries: [...s.logEntries, { ...entry, id: `log_${Date.now()}` }] 
+  addLogEntry: (entry) => set((s) => ({
+    logEntries: [...s.logEntries, { ...entry, id: `log_${Date.now()}` }]
   })),
   currentSession: null,
   setCurrentSession: (session) => set({ currentSession: session }),
-  
+  startSession: (name: string) => {
+    const session: LogSession = {
+      id: `session_${Date.now()}`,
+      name,
+      startTime: Date.now(),
+      entries: [],
+      engineType: get().profile.engine,
+      mapType: get().profile.currentMap as any,
+      maxRpm: 0,
+      maxBoost: 0,
+      maxSpeed: 0,
+      maxIat: 0,
+      knockEvents: 0,
+      avgAfr: 0,
+      aiRecommendations: [],
+    };
+    set({ currentSession: session, isLogging: true });
+  },
+  stopSession: () => {
+    const session = get().currentSession;
+    if (session) {
+      set({
+        currentSession: { ...session, endTime: Date.now() },
+        isLogging: false,
+      });
+    }
+  },
+
   // Flash
   showFlashModal: false,
   setShowFlashModal: (show) => set({ showFlashModal: show }),
@@ -171,11 +236,16 @@ export const useStore = create<AppState>((set, get) => ({
   setFlashSession: (session) => set({ flashSession: session }),
   flashBackups: [],
   addFlashBackup: (backup) => set((s) => ({ flashBackups: [...s.flashBackups, backup] })),
-  
+
   // Quick Switch
   showQuickSwitch: false,
   setShowQuickSwitch: (show) => set({ showQuickSwitch: show }),
-  
+
+  // Gauge Layouts
+  gaugeLayouts: DEFAULT_GAUGE_LAYOUTS,
+  activeGaugeLayout: 'default',
+  setActiveGaugeLayout: (id) => set({ activeGaugeLayout: id }),
+
   // AI Tuning
   aiRecommendations: aiTuningEngine.analyze({}, {
     engine: 'n54',
@@ -190,7 +260,7 @@ export const useStore = create<AppState>((set, get) => ({
   setAiRecommendations: (recs) => set({ aiRecommendations: recs }),
   aiChatOpen: false,
   setAiChatOpen: (open) => set({ aiChatOpen: open }),
-  
+
   // Watchdog
   watchdogEnabled: true,
   setWatchdogEnabled: (enabled) => set({ watchdogEnabled: enabled }),
@@ -201,7 +271,7 @@ export const useStore = create<AppState>((set, get) => ({
   maxAutoReconnectAttempts: 5,
   obd2ConnectionPaused: false,
   setObd2ConnectionPaused: (paused) => set({ obd2ConnectionPaused: paused }),
-  
+
   // Notifications
   notifications: [],
   addNotification: (n) => set((s) => ({ notifications: [...s.notifications, { ...n, id: `notif_${Date.now()}` }] })),
