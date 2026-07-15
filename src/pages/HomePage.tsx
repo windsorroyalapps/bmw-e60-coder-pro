@@ -1,19 +1,20 @@
 import React from 'react';
 import { useStore } from '@/hooks/useStore';
-import { ENGINE_SPECS, INJECTOR_DATABASE } from '@/lib/engineData';
+import { ENGINE_SPECS } from '@/lib/engineData';
 import { aiTuningEngine } from '@/lib/aiTuningEngine';
 import {
   Car, Zap, Activity, Settings,
   Thermometer, Gauge, AlertTriangle, CheckCircle,
   Fuel, Brain, FileText, Cable, ZapOff, Play
 } from 'lucide-react';
+import type { MapType } from '@/types';
 
 export const HomePage: React.FC = () => {
-  const { profile, currentMap, liveData, obd2, setActiveScreen, setShowFlashModal } = useStore();
+  const { profile, liveData, obd2, setActiveScreen, setShowFlashModal } = useStore();
   const engineSpec = ENGINE_SPECS[profile.engine];
-  const injectorSpec = INJECTOR_DATABASE[profile.injector];
-  const estimatedHp = currentMap ? aiTuningEngine.estimateMapHp(profile.engine, currentMap.id) : 0;
-  const estimatedTq = currentMap ? aiTuningEngine.estimateMapTorque(profile.engine, currentMap.id) : 0;
+  const currentMapId = profile.currentMap as MapType;
+  const estimatedHp = aiTuningEngine.estimateMapHp(profile.engine, currentMapId);
+  const estimatedTq = aiTuningEngine.estimateMapTorque(profile.engine, currentMapId);
 
   const quickActions = [
     { id: 'gauges', label: 'Gauges', icon: Gauge, color: 'text-blue-400', bg: 'bg-blue-500/10' },
@@ -113,7 +114,7 @@ export const HomePage: React.FC = () => {
         <div className="bg-[#0d1117] rounded-xl p-4 border border-gray-800">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider">Vehicle Profile</h2>
-            <span className="text-xs text-gray-500">{profile.vin}</span>
+            <span className="text-xs text-gray-500">{profile.year || '2008'}</span>
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
@@ -124,19 +125,10 @@ export const HomePage: React.FC = () => {
             <div>
               <div className="text-xs text-gray-500">Current Map</div>
               <div className="flex items-center gap-2">
-                <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: currentMap?.color || '#4CAF50' }} />
-                <span className="text-sm font-semibold text-white">{currentMap?.name || 'Stock'}</span>
+                <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: currentMapId === 'stock' ? '#4CAF50' : currentMapId === 'economy' ? '#009688' : currentMapId === 'valet' ? '#607D8B' : '#FF9800' }} />
+                <span className="text-sm font-semibold text-white capitalize">{currentMapId || 'Stock'}</span>
               </div>
               <div className="text-xs text-gray-500">~{estimatedHp}hp / {estimatedTq}Nm</div>
-            </div>
-            <div>
-              <div className="text-xs text-gray-500">Injector</div>
-              <div className="text-sm font-semibold text-white">{injectorSpec.name}</div>
-              <div className="text-xs text-gray-500">{injectorSpec.flowRateCc}cc/min</div>
-            </div>
-            <div>
-              <div className="text-xs text-gray-500">Mileage</div>
-              <div className="text-sm font-semibold text-white">{profile.mileage.toLocaleString()} km</div>
             </div>
           </div>
         </div>
@@ -203,37 +195,16 @@ export const HomePage: React.FC = () => {
           </div>
         </div>
 
-        {/* Safety Score */}
-        {currentMap && (
-          <div className="bg-[#0d1117] rounded-xl p-4 border border-gray-800">
-            <div className="flex items-center justify-between mb-2">
-              <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider">Safety Score</h2>
-              <span className={`text-lg font-bold ${currentMap.safetyScore >= 80 ? 'text-green-400' : currentMap.safetyScore >= 60 ? 'text-yellow-400' : 'text-red-400'}`}>
-                {currentMap.safetyScore}/100
-              </span>
-            </div>
-            <div className="w-full bg-gray-800 rounded-full h-2.5">
-              <div className={`h-2.5 rounded-full transition-all ${currentMap.safetyScore >= 80 ? 'bg-green-500' : currentMap.safetyScore >= 60 ? 'bg-yellow-500' : 'bg-red-500'}`} style={{ width: `${currentMap.safetyScore}%` }} />
-            </div>
-            {currentMap.safetyScore < 60 && (
-              <div className="flex items-center gap-2 mt-2 text-yellow-400 text-xs">
-                <AlertTriangle className="w-4 h-4" />
-                Review hardware requirements for this map
-              </div>
-            )}
-          </div>
-        )}
-
         {/* Flash Status / Action */}
-        {obd2.connectionState === 'connected' && currentMap && (
+        {obd2.connectionState === 'connected' && (
           <button
             onClick={() => setShowFlashModal(true)}
             className="w-full bg-orange-600 hover:bg-orange-700 text-white rounded-xl p-4 flex items-center justify-center gap-3 transition-colors"
           >
             <Zap className="w-5 h-5" />
             <div className="text-left">
-              <div className="font-semibold">Flash {currentMap.name} to DME</div>
-              <div className="text-xs text-orange-200">~{estimatedHp}hp | {aiTuningEngine.estimateMapTorque(profile.engine, currentMap.id)}Nm</div>
+              <div className="font-semibold">Flash {currentMapId} to DME</div>
+              <div className="text-xs text-orange-200">~{estimatedHp}hp | {estimatedTq}Nm</div>
             </div>
             <Play className="w-5 h-5 ml-auto" />
           </button>
