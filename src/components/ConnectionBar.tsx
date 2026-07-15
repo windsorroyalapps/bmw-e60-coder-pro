@@ -5,7 +5,7 @@ import {
   CircleDot, WifiOff, Plug, Unplug, Zap,
   Battery, AlertTriangle, Loader,
   ChevronDown, ChevronUp, Cpu, Shield, ShieldOff,
-  HeartPulse
+  HeartPulse, Settings2
 } from 'lucide-react';
 
 export const ConnectionBar: React.FC = () => {
@@ -13,6 +13,7 @@ export const ConnectionBar: React.FC = () => {
     obd2, setObd2, setObd2Cable, setShowFlashModal,
     watchdogEnabled, setWatchdogEnabled, connectionDead,
     autoReconnectAttempts, maxAutoReconnectAttempts,
+    setShowAdapterSettings, selectedAdapterId, adapterConfigs,
   } = useStore();
   const [expanded, setExpanded] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
@@ -73,19 +74,38 @@ export const ConnectionBar: React.FC = () => {
   const ecuOnline = obd2.ecus.filter(e => e.status === 'online').length;
   const ecuTotal = obd2.ecus.length;
 
+  // Show selected adapter name if disconnected
+  const selectedAdapter = selectedAdapterId ? adapterConfigs[selectedAdapterId] : null;
+
   return (
     <div className="bg-[#0d1117] border-b border-gray-800">
       {/* Top Row: Status (left) + Centered Connect Button + Flash/Expand (right) */}
       <div className="flex items-center gap-3 px-4 py-2">
-        {/* LEFT: Compact Status Badge */}
-        <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-medium ${getStateColor()}`}>
-          {getStateIcon()}
-          <span>{getStateLabel()}</span>
-          {obd2.connectionState === 'connected' && obd2.cable && (
-            <span className="text-gray-400 ml-1">
-              {obd2.cable.type === 'k_dcan_ftdi' ? 'FTDI' : obd2.cable.type === 'k_dcan_ch340' ? 'CH340' : 'ENET'}
-            </span>
-          )}
+        {/* LEFT: Status Badge + OBD2 Settings button */}
+        <div className="flex items-center gap-2">
+          <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-medium ${getStateColor()}`}>
+            {getStateIcon()}
+            <span>{getStateLabel()}</span>
+            {obd2.connectionState === 'connected' && obd2.cable && (
+              <span className="text-gray-400 ml-1">
+                {obd2.cable.type === 'k_dcan_ftdi' ? 'FTDI' : obd2.cable.type === 'k_dcan_ch340' ? 'CH340' : 'ENET'}
+              </span>
+            )}
+          </div>
+
+          {/* OBD2 Settings Button - always visible */}
+          <button
+            onClick={() => setShowAdapterSettings(true)}
+            title="OBD Adapter Settings"
+            className={`flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border transition-colors ${
+              selectedAdapterId
+                ? 'bg-blue-500/10 text-blue-400 border-blue-500/20 hover:bg-blue-500/20'
+                : 'bg-gray-800 text-gray-500 border-gray-700 hover:bg-gray-700 hover:text-gray-300'
+            }`}
+          >
+            <Settings2 className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">{selectedAdapter ? selectedAdapter.name.split(' ')[0] : 'Adapter'}</span>
+          </button>
         </div>
 
         {/* CENTER: Connect/Disconnect Button - always centered */}
@@ -110,7 +130,7 @@ export const ConnectionBar: React.FC = () => {
           )}
         </div>
 
-        {/* RIGHT: Flash + Expand + Watchdog */}
+        {/* RIGHT: Flash + Expand */}
         <div className="flex items-center gap-2">
           {/* Flash Button (only when connected) */}
           {obd2.connectionState === 'connected' && (
@@ -134,6 +154,18 @@ export const ConnectionBar: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* Second Row: Selected adapter hint (when disconnected + adapter selected) */}
+      {obd2.connectionState !== 'connected' && selectedAdapter && (
+        <div className="flex items-center justify-center gap-2 px-4 pb-1.5 text-[10px] text-gray-600">
+          <span>Using adapter preset:</span>
+          <span className="text-blue-400 font-medium">{selectedAdapter.name}</span>
+          <span className="text-gray-700">|</span>
+          <span>{selectedAdapter.protocolPreference === 'auto' ? 'Auto protocol' : selectedAdapter.protocolPreference.toUpperCase()}</span>
+          <span className="text-gray-700">|</span>
+          <span>{selectedAdapter.baudRate >= 1000 ? (selectedAdapter.baudRate / 1000) + 'k' : selectedAdapter.baudRate} baud</span>
+        </div>
+      )}
 
       {/* Second Row: Detailed Stats (when connected) */}
       {obd2.connectionState === 'connected' && (
