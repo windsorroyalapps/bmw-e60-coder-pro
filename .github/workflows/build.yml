@@ -59,7 +59,7 @@ jobs:
         run: npm run build
 
       - name: Copy web assets to Android
-        run: npx cap copy android
+        run: npm exec -- cap copy android
 
       - name: Generate missing Cordova files
         run: |
