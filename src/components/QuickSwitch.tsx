@@ -19,7 +19,7 @@ const MAP_TYPES: { id: MapType; name: string; icon: typeof Zap; color: string; d
 ];
 
 export const QuickSwitch: React.FC = () => {
-  const { showQuickSwitch, setShowQuickSwitch, profile, generateMap } = useStore();
+  const { showQuickSwitch, setShowQuickSwitch, profile, setProfile } = useStore();
 
   if (!showQuickSwitch) return null;
 
@@ -28,7 +28,7 @@ export const QuickSwitch: React.FC = () => {
 
   const handleSwitch = (mapId: MapType) => {
     if (mapId === currentMapId) return;
-    generateMap(mapId);
+    setProfile({ ...profile, currentMap: mapId });
     setShowQuickSwitch(false);
   };
 
@@ -61,7 +61,7 @@ export const QuickSwitch: React.FC = () => {
           <div className="text-right">
             <div className="text-xs text-gray-500">Est. Output</div>
             <div className="text-sm text-orange-400 font-mono">
-              {aiTuningEngine.estimateMapHp(profile.engine, currentMapId)}hp
+              {aiTuningEngine.estimateMapHp(profile.engine, currentMapId as MapType)}hp
             </div>
           </div>
         </div>
