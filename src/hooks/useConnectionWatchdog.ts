@@ -10,7 +10,6 @@ export function useConnectionWatchdog() {
     setConnectionDead,
     setAutoReconnectAttempts,
     setObd2,
-    setObd2ConnectionPaused,
     autoReconnectAttempts,
     maxAutoReconnectAttempts,
     addNotification,
@@ -42,7 +41,6 @@ export function useConnectionWatchdog() {
         setObd2(obd2Manager.getState());
         addNotification({ message: 'Connection restored', type: 'success' });
       } else {
-        // Schedule next attempt
         reconnectTimerRef.current = setTimeout(attemptReconnect, 2000);
       }
     } catch {
@@ -70,7 +68,6 @@ export function useConnectionWatchdog() {
     };
   }, [watchdogEnabled, connectionDead, attemptReconnect]);
 
-  // Heartbeat from live data polling
   useEffect(() => {
     if (!watchdogEnabled || connectionDead || obd2ConnectionPaused) return;
 
