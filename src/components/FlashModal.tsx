@@ -2,27 +2,23 @@ import React, { useState, useRef, useCallback } from 'react';
 import { useStore } from '@/hooks/useStore';
 import { obd2Manager } from '@/lib/obd2Connection';
 import type { FlashSession } from '@/lib/obd2Connection';
-import type { FlashBackup } from '@/types';
 import { parseFlashFile, fixChecksums, validateChecksums, type ParsedFlashFile, type ChecksumResult } from '@/lib/flashEngine';
 import { MSD81_SECTORS } from '@/lib/flashEngine';
 import {
-  X, Zap, AlertTriangle, CheckCircle, Loader,
+  X, Zap, AlertTriangle, CheckCircle,
   ShieldAlert, Play, Square, RotateCcw,
   Save, HardDrive, FileWarning, Upload, FileCheck,
   Cpu, ChevronDown, ChevronUp
 } from 'lucide-react';
 
 export const FlashModal: React.FC = () => {
-  const { showFlashModal, setShowFlashModal, obd2, profile, addNotification } = useStore();
+  const { showFlashModal, setShowFlashModal, obd2, profile, addNotification, setFlashSession } = useStore();
   const [step, setStep] = useState<'backup' | 'verify' | 'select' | 'upload' | 'checks' | 'confirm' | 'flashing' | 'complete' | 'error'>('backup');
   const [flashType, setFlashType] = useState<'full' | 'quick' | 'live'>('quick');
   const [session, setSession] = useState<FlashSession | null>(null);
   const [safetyChecks, setSafetyChecks] = useState<{ name: string; pass: boolean; critical: boolean }[]>([]);
   const [dmeInfo, setDmeInfo] = useState<{ vin: string; ecuType: string; software: string } | null>(null);
   const [vinMismatch, setVinMismatch] = useState(false);
-  const [backingUp, setBackingUp] = useState(false);
-  const [backupProgress, setBackupProgress] = useState(0);
-  const [backupSector, setBackupSector] = useState('');
   // Tune file upload state
   const [parsedFile, setParsedFile] = useState<ParsedFlashFile | null>(null);
   const [checksumResults, setChecksumResults] = useState<ChecksumResult[] | null>(null);
@@ -103,8 +99,6 @@ export const FlashModal: React.FC = () => {
     setSafetyChecks([]);
     setDmeInfo(null);
     setVinMismatch(false);
-    setBackingUp(false);
-    setBackupProgress(0);
     setParsedFile(null);
     setChecksumResults(null);
     setChecksumsFixed(false);
@@ -146,7 +140,6 @@ export const FlashModal: React.FC = () => {
   };
 
   const startFlashing = () => {
-    // Simulated flashing sequence
     const flashSession: FlashSession = {
       id: `flash_${Date.now()}`,
       startTime: Date.now(),
@@ -166,7 +159,6 @@ export const FlashModal: React.FC = () => {
     };
     setSession(flashSession);
 
-    // Simulate progress
     let progress = 0;
     const interval = setInterval(() => {
       progress += Math.random() * 5;
@@ -317,7 +309,6 @@ export const FlashModal: React.FC = () => {
             <>
               <p className="text-sm text-gray-400 mb-3">Upload your tune file for validation:</p>
 
-              {/* Drop Zone */}
               {!parsedFile && (
                 <div
                   onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
@@ -350,7 +341,6 @@ export const FlashModal: React.FC = () => {
                 </div>
               )}
 
-              {/* Parsed File Info */}
               {parsedFile && (
                 <div className="space-y-3">
                   <div className="bg-green-500/10 border border-green-500/30 rounded-xl p-4">
@@ -384,7 +374,6 @@ export const FlashModal: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Checksum Validation */}
                   {checksumResults && (
                     <div className="border border-gray-700 rounded-xl overflow-hidden">
                       <button
