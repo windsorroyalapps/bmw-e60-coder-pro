@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useStore } from '@/hooks/useStore';
-import { geminiAiService } from '@/lib/geminiAiService';
+import { testConnection, chat } from '@/lib/geminiAiService';
 import {
   Brain, AlertTriangle, CheckCircle, Info, Zap, Fuel,
   Gauge, Settings, TrendingUp, Shield, Play, Sparkles,
@@ -10,41 +10,37 @@ import {
 
 export const AiAnalysisPage: React.FC = () => {
   const {
-    liveData, currentMap, aiRecommendations,
-    refreshAiAnalysis, refreshAiAnalysisAsync, applyRecommendation,
-    isAiTuning, setIsAiTuning,
+    liveData, profile, aiRecommendations,
+    refreshAiAnalysisAsync,
+    aiLiveTuningEnabled, setAiLiveTuningEnabled,
     aiApiAvailable, aiIsThinking, aiSummary, aiSafetyAssessment,
-    aiEstimatedHpGain, aiConfidence, aiChatHistory, sendAiChat, aiLastError,
+    aiEstimatedHpGain, aiConfidence, aiChatHistory, aiLastError,
   } = useStore();
 
   const [chatOpen, setChatOpen] = useState(false);
   const [chatInput, setChatInput] = useState('');
   const [testedApi, setTestedApi] = useState(false);
+  const [localChatHistory, setLocalChatHistory] = useState<{ role: 'user' | 'model'; text: string }[]>([]);
   const chatEndRef = useRef<HTMLDivElement>(null);
+
+  const currentMapId = profile.currentMap;
 
   // Auto-test AI API connection on first load
   useEffect(() => {
-    if (!testedApi && aiApiAvailable === null) {
-      geminiAiService.testConnection().then(ok => {
+    if (!testedApi) {
+      testConnection().then(ok => {
         useStore.getState().setAiApiAvailable(ok);
         setTestedApi(true);
       });
     }
-  }, [testedApi, aiApiAvailable]);
-
-  // Refresh analysis when live data changes (engine running)
-  useEffect(() => {
-    if (liveData.rpm > 0 && currentMap) {
-      refreshAiAnalysis();
-    }
-  }, [liveData.rpm, liveData.boost, liveData.afr, liveData.knock, liveData.iat, liveData.oilTemp]);
+  }, [testedApi]);
 
   // Auto-scroll chat to bottom
   useEffect(() => {
     if (chatEndRef.current) {
       chatEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [aiChatHistory]);
+  }, [aiChatHistory, localChatHistory]);
 
   const handleDeepAnalyze = async () => {
     await refreshAiAnalysisAsync();
@@ -54,7 +50,13 @@ export const AiAnalysisPage: React.FC = () => {
     if (!chatInput.trim()) return;
     const question = chatInput.trim();
     setChatInput('');
-    await sendAiChat(question);
+    setLocalChatHistory(prev => [...prev, { role: 'user', text: question }]);
+    try {
+      const response = await chat(question, useStore.getState().aiChatHistory, liveData as any, profile.engine);
+      setLocalChatHistory(prev => [...prev, { role: 'model', text: response }]);
+    } catch {
+      setLocalChatHistory(prev => [...prev, { role: 'model', text: 'Sorry, AI chat is currently unavailable.' }]);
+    }
   };
 
   const handleChatKeyDown = (e: React.KeyboardEvent) => {
@@ -94,8 +96,9 @@ export const AiAnalysisPage: React.FC = () => {
     }
   };
 
-  const criticalCount = aiRecommendations.filter(r => r.severity === 'critical').length;
-  const warningCount = aiRecommendations.filter(r => r.severity === 'warning').length;
+  const criticalCount = aiRecommendations.filter((r: any) => r.severity === 'critical').length;
+  const warningCount = aiRecommendations.filter((r: any) => r.severity === 'warning').length;
+  const mergedChat = [...aiChatHistory.map(h => ({ role: h.role, text: h.text })), ...localChatHistory];
 
   return (
     <div className="flex flex-col h-full bg-[#0a0a0a]">
@@ -117,16 +120,10 @@ export const AiAnalysisPage: React.FC = () => {
                     <WifiOff className="w-3 h-3" /> Local Rules Only
                   </span>
                 )}
-                {aiApiAvailable === null && (
-                  <span className="text-[10px] flex items-center gap-1 text-gray-500">
-                    <Loader className="w-3 h-3 animate-spin" /> Checking AI...
-                  </span>
-                )}
               </div>
             </div>
           </div>
           <div className="flex items-center gap-2">
-            {/* Deep Analyze Button */}
             <button
               onClick={handleDeepAnalyze}
               disabled={aiIsThinking || liveData.rpm === 0}
@@ -135,27 +132,19 @@ export const AiAnalysisPage: React.FC = () => {
               {aiIsThinking ? <Loader className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
               {aiIsThinking ? 'Analyzing...' : 'Deep Analyze'}
             </button>
-
-            {/* AI Tuning Toggle */}
             <button
-              onClick={() => setIsAiTuning(!isAiTuning)}
+              onClick={() => setAiLiveTuningEnabled(!aiLiveTuningEnabled)}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs transition-colors ${
-                isAiTuning
-                  ? 'bg-purple-600 text-white'
-                  : 'bg-purple-600/20 text-purple-400 hover:bg-purple-600/30'
+                aiLiveTuningEnabled ? 'bg-purple-600 text-white' : 'bg-purple-600/20 text-purple-400 hover:bg-purple-600/30'
               }`}
             >
               <Sparkles className="w-3.5 h-3.5" />
-              {isAiTuning ? 'AI Active' : 'Auto-Tune'}
+              {aiLiveTuningEnabled ? 'AI Active' : 'Auto-Tune'}
             </button>
-
-            {/* Chat Toggle */}
             <button
               onClick={() => setChatOpen(!chatOpen)}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs transition-colors ${
-                chatOpen
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-blue-600/20 text-blue-400 hover:bg-blue-600/30'
+                chatOpen ? 'bg-blue-600 text-white' : 'bg-blue-600/20 text-blue-400 hover:bg-blue-600/30'
               }`}
             >
               <MessageSquare className="w-3.5 h-3.5" />
@@ -166,7 +155,6 @@ export const AiAnalysisPage: React.FC = () => {
       </div>
 
       <div className="flex-1 overflow-auto p-4 space-y-4">
-        {/* AI Status Banner */}
         {aiIsThinking && (
           <div className="bg-purple-500/10 border border-purple-500/30 rounded-xl p-3 flex items-center gap-3 animate-pulse">
             <Loader className="w-5 h-5 text-purple-400 animate-spin" />
@@ -177,7 +165,6 @@ export const AiAnalysisPage: React.FC = () => {
           </div>
         )}
 
-        {/* Error Banner */}
         {aiLastError && aiApiAvailable === false && (
           <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-xl p-3 flex items-center gap-3">
             <WifiOff className="w-5 h-5 text-yellow-400" />
@@ -216,7 +203,6 @@ export const AiAnalysisPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Engine Off State */}
         {liveData.rpm === 0 && (
           <div className="text-center py-8 text-gray-500 bg-[#0d1117] rounded-xl border border-gray-800">
             <CheckCircle className="w-12 h-12 mx-auto mb-3 text-gray-600" />
@@ -225,7 +211,6 @@ export const AiAnalysisPage: React.FC = () => {
           </div>
         )}
 
-        {/* AI Summary Card */}
         {aiSummary && liveData.rpm > 0 && (
           <div className="bg-gradient-to-r from-purple-500/10 to-blue-500/10 border border-purple-500/20 rounded-xl p-4">
             <div className="flex items-center gap-2 mb-2">
@@ -251,36 +236,28 @@ export const AiAnalysisPage: React.FC = () => {
           </div>
         )}
 
-        {/* AI Auto-Tuning Status */}
-        {isAiTuning && liveData.rpm > 0 && (
+        {aiLiveTuningEnabled && liveData.rpm > 0 && (
           <div className="bg-purple-500/10 border border-purple-500/30 rounded-xl p-4 flex items-center gap-3">
             <div className="w-8 h-8 rounded-full bg-purple-500/20 flex items-center justify-center">
               <Sparkles className="w-5 h-5 text-purple-400 animate-pulse" />
             </div>
             <div>
               <div className="text-sm font-semibold text-purple-300">AI Auto-Tuning Active</div>
-              <div className="text-xs text-purple-400">
-                Automatically analyzing data and suggesting optimizations every 2 seconds
-              </div>
+              <div className="text-xs text-purple-400">Automatically analyzing data and suggesting optimizations</div>
             </div>
           </div>
         )}
 
         {/* Recommendations */}
         <div className="space-y-3">
-          {/* Section header with counts */}
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-medium text-gray-400">Recommendations</h3>
             <div className="flex items-center gap-2">
               {criticalCount > 0 && (
-                <span className="text-xs bg-red-500/20 text-red-400 px-2 py-0.5 rounded">
-                  {criticalCount} Critical
-                </span>
+                <span className="text-xs bg-red-500/20 text-red-400 px-2 py-0.5 rounded">{criticalCount} Critical</span>
               )}
               {warningCount > 0 && (
-                <span className="text-xs bg-yellow-500/20 text-yellow-400 px-2 py-0.5 rounded">
-                  {warningCount} Warning
-                </span>
+                <span className="text-xs bg-yellow-500/20 text-yellow-400 px-2 py-0.5 rounded">{warningCount} Warning</span>
               )}
               <span className="text-xs text-gray-600">{aiRecommendations.length} total</span>
             </div>
@@ -293,7 +270,7 @@ export const AiAnalysisPage: React.FC = () => {
               <p className="text-sm">No tuning adjustments recommended at this time</p>
             </div>
           ) : (
-            aiRecommendations.map(rec => (
+            aiRecommendations.map((rec: any) => (
               <div key={rec.id} className={`rounded-xl border p-4 ${getSeverityBg(rec.severity)}`}>
                 <div className="flex items-start gap-3">
                   <div className="mt-0.5">{getSeverityIcon(rec.severity)}</div>
@@ -312,15 +289,14 @@ export const AiAnalysisPage: React.FC = () => {
                     </div>
                     <p className="text-sm text-gray-300 mb-2">{rec.message}</p>
                     <p className="text-xs text-gray-500 mb-2">{rec.reason}</p>
-
                     <div className="flex items-center gap-4 text-xs flex-wrap">
                       <div>
                         <span className="text-gray-500">Current: </span>
-                        <span className="text-white font-mono">{rec.currentValue.toFixed(2)}</span>
+                        <span className="text-white font-mono">{typeof rec.currentValue === 'number' ? rec.currentValue.toFixed(2) : rec.currentValue}</span>
                       </div>
                       <div>
                         <span className="text-gray-500">Recommended: </span>
-                        <span className="text-green-400 font-mono">{rec.recommendedValue.toFixed(2)}</span>
+                        <span className="text-green-400 font-mono">{typeof rec.recommendedValue === 'number' ? rec.recommendedValue.toFixed(2) : rec.recommendedValue}</span>
                       </div>
                       {rec.autoApplicable && (
                         <span className="text-green-400 flex items-center gap-1">
@@ -328,16 +304,6 @@ export const AiAnalysisPage: React.FC = () => {
                         </span>
                       )}
                     </div>
-
-                    {rec.autoApplicable && (
-                      <button
-                        onClick={() => applyRecommendation(rec.id)}
-                        className="mt-2 flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs px-3 py-1.5 rounded-lg transition-colors"
-                      >
-                        <Play className="w-3 h-3" />
-                        Apply
-                      </button>
-                    )}
                   </div>
                 </div>
               </div>
@@ -345,23 +311,18 @@ export const AiAnalysisPage: React.FC = () => {
           )}
         </div>
 
-        {/* Performance Summary */}
-        {currentMap && (
+        {/* Current Map Summary */}
+        {currentMapId && (
           <div className="bg-[#0d1117] rounded-xl p-4 border border-gray-800">
             <h3 className="font-semibold text-white mb-3">Current Map Summary</h3>
             <div className="grid grid-cols-3 gap-4 text-sm">
               <div>
                 <div className="text-gray-500">Map</div>
-                <div className="text-white">{currentMap.name}</div>
+                <div className="text-white capitalize">{currentMapId}</div>
               </div>
               <div>
-                <div className="text-gray-500">Safety Score</div>
-                <div className={`font-mono ${
-                  currentMap.safetyScore >= 80 ? 'text-green-400' :
-                  currentMap.safetyScore >= 60 ? 'text-yellow-400' : 'text-red-400'
-                }`}>
-                  {currentMap.safetyScore}/100
-                </div>
+                <div className="text-gray-500">Engine</div>
+                <div className="text-white uppercase">{profile.engine}</div>
               </div>
               <div>
                 <div className="text-gray-500">AI Powered</div>
@@ -375,39 +336,29 @@ export const AiAnalysisPage: React.FC = () => {
       {/* Chat Panel */}
       {chatOpen && (
         <div className="border-t border-gray-800 bg-[#0d1117] flex flex-col" style={{ height: '50%' }}>
-          {/* Chat Header */}
           <div className="flex items-center justify-between px-4 py-2 border-b border-gray-800">
             <div className="flex items-center gap-2">
               <MessageSquare className="w-4 h-4 text-blue-400" />
               <span className="text-sm font-medium text-white">AI Tuning Chat</span>
-              {aiApiAvailable === true && (
-                <span className="w-2 h-2 rounded-full bg-green-400" />
-              )}
+              {aiApiAvailable === true && <span className="w-2 h-2 rounded-full bg-green-400" />}
             </div>
             <div className="flex items-center gap-2">
-              {aiChatHistory.length > 0 && (
+              {mergedChat.length > 0 && (
                 <button
-                  onClick={() => {
-                    geminiAiService.clearChat();
-                    useStore.getState().setAiChatHistory([]);
-                  }}
+                  onClick={() => setLocalChatHistory([])}
                   className="text-xs text-gray-500 hover:text-red-400 transition-colors"
                 >
                   Clear
                 </button>
               )}
-              <button
-                onClick={() => setChatOpen(false)}
-                className="text-gray-500 hover:text-white transition-colors"
-              >
+              <button onClick={() => setChatOpen(false)} className="text-gray-500 hover:text-white transition-colors">
                 <X className="w-4 h-4" />
               </button>
             </div>
           </div>
 
-          {/* Chat Messages */}
           <div className="flex-1 overflow-y-auto p-3 space-y-3">
-            {aiChatHistory.length === 0 && (
+            {mergedChat.length === 0 && (
               <div className="text-center py-6 text-gray-600">
                 <Bot className="w-8 h-8 mx-auto mb-2 text-gray-700" />
                 <p className="text-sm">Ask me anything about tuning your BMW E60</p>
@@ -425,7 +376,7 @@ export const AiAnalysisPage: React.FC = () => {
               </div>
             )}
 
-            {aiChatHistory.map((msg, idx) => (
+            {mergedChat.map((msg, idx) => (
               <div key={idx} className={`flex gap-2 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                 {msg.role === 'model' && (
                   <div className="w-6 h-6 rounded-full bg-purple-500/20 flex items-center justify-center flex-shrink-0 mt-0.5">
@@ -433,9 +384,7 @@ export const AiAnalysisPage: React.FC = () => {
                   </div>
                 )}
                 <div className={`max-w-[80%] rounded-xl px-3 py-2 text-xs leading-relaxed ${
-                  msg.role === 'user'
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-gray-800 text-gray-300'
+                  msg.role === 'user' ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-300'
                 }`}>
                   {msg.text}
                 </div>
@@ -461,11 +410,9 @@ export const AiAnalysisPage: React.FC = () => {
                 </div>
               </div>
             )}
-
             <div ref={chatEndRef} />
           </div>
 
-          {/* Chat Input */}
           <div className="px-3 py-2 border-t border-gray-800">
             <div className="flex items-center gap-2">
               <input
