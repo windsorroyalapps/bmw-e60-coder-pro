@@ -2,19 +2,19 @@ import React, { useState } from 'react';
 import { useStore } from '@/hooks/useStore';
 import { exportLogToCSV, downloadCSV } from '@/lib/csvExport';
 import {
-  FileText, Download, Trash2, Play, Square,
+  FileText, Download, Play, Square,
   Clock, Database, ChevronRight
 } from 'lucide-react';
 
 export const LogsPage: React.FC = () => {
-  const { isLogging, setIsLogging, logEntries, setCurrentSession, currentSession } = useStore();
+  const { isLogging, setIsLogging, logEntries, startSession, stopSession } = useStore();
   const [selectedSession, setSelectedSession] = useState<string | null>(null);
 
-  // Group entries by session
+  // Group entries by date (using timestamp date as session key)
   const sessions = logEntries.reduce((acc, entry) => {
-    const session = entry.session || 'default';
-    if (!acc[session]) acc[session] = [];
-    acc[session].push(entry);
+    const date = new Date(entry.timestamp).toISOString().split('T')[0];
+    if (!acc[date]) acc[date] = [];
+    acc[date].push(entry);
     return acc;
   }, {} as Record<string, typeof logEntries>);
 
@@ -26,14 +26,11 @@ export const LogsPage: React.FC = () => {
   };
 
   const handleStartLogging = () => {
-    const sessionId = `session_${Date.now()}`;
-    setCurrentSession(sessionId);
-    setIsLogging(true);
+    startSession(`Log ${new Date().toLocaleTimeString()}`);
   };
 
   const handleStopLogging = () => {
-    setIsLogging(false);
-    setCurrentSession(null);
+    stopSession();
   };
 
   return (
