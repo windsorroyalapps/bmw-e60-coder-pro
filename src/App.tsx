@@ -21,7 +21,23 @@ import {
 import './App.css';
 
 function App() {
-  const { activeScreen, setActiveScreen, setShowQuickSwitch, obd2, updateLiveData, isLogging, currentSession, addLogEntry, obd2ConnectionPaused, showAdapterSettings, setShowAdapterSettings, selectedAdapterId, setSelectedAdapterId, adapterConfigs, updateAdapterConfig } = useStore();
+  const {
+    activeScreen,
+    setActiveScreen,
+    setShowQuickSwitch,
+    obd2,
+    updateLiveData,
+    isLogging,
+    currentSession,
+    addLogEntry,
+    obd2ConnectionPaused,
+    showAdapterSettings,
+    setShowAdapterSettings,
+    selectedAdapterId,
+    setSelectedAdapterId,
+    adapterConfigs,
+    updateAdapterConfig,
+  } = useStore();
 
   useAndroidAutoProjection();
   useConnectionWatchdog();
