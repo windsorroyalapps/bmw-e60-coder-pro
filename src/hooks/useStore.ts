@@ -20,6 +20,7 @@ interface AppState {
   // Profile
   profile: TuningProfile;
   setProfile: (profile: TuningProfile) => void;
+  updateProfile: (partial: Partial<TuningProfile>) => void;
 
   // Live Data
   liveData: LiveData;
@@ -171,6 +172,7 @@ export const useStore = create<AppState>((set, get) => ({
     hasMethInjection: false,
   },
   setProfile: (profile) => set({ profile }),
+  updateProfile: (partial) => set((s) => ({ profile: { ...s.profile, ...partial } })),
 
   // Live Data
   liveData: {
