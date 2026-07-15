@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect } from 'react';
 import { useStore } from '@/hooks/useStore';
 import { obd2Manager } from '@/lib/obd2Connection';
 import { ConnectionBar } from '@/components/ConnectionBar';
@@ -16,7 +16,7 @@ import { DTCPage } from '@/pages/DTCPage';
 import { useAndroidAutoProjection } from '@/hooks/useAndroidAutoProjection';
 import { useConnectionWatchdog } from '@/hooks/useConnectionWatchdog';
 import {
-  Home, Gauge, Zap, Brain, FileText, Settings, Shuffle, Gamepad2, AlertTriangle
+  Home, Gauge, Zap, Brain, FileText, Settings, Gamepad2, AlertTriangle
 } from 'lucide-react';
 import './App.css';
 
@@ -38,7 +38,6 @@ function App() {
           addLogEntry({
             timestamp: Date.now(),
             data,
-            session: currentSession,
           });
         }
       }
