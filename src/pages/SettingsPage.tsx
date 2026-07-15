@@ -60,31 +60,26 @@ export const SettingsPage: React.FC = () => {
           </h2>
           <div className="space-y-3">
             <div>
-              <label className="text-xs text-gray-500 block mb-1">Profile Name</label>
+              <label className="text-xs text-gray-500 block mb-1">Year</label>
               <input
                 type="text"
-                value={profile.name}
-                onChange={(e) => updateProfile({ name: e.target.value })}
+                value={profile.year || ''}
+                onChange={(e) => updateProfile({ year: e.target.value })}
                 className="w-full bg-[#161b22] border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500"
               />
             </div>
             <div>
-              <label className="text-xs text-gray-500 block mb-1">VIN</label>
-              <input
-                type="text"
-                value={profile.vin}
-                onChange={(e) => updateProfile({ vin: e.target.value })}
-                className="w-full bg-[#161b22] border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500 font-mono"
-              />
-            </div>
-            <div>
-              <label className="text-xs text-gray-500 block mb-1">Mileage (km)</label>
-              <input
-                type="number"
-                value={profile.mileage}
-                onChange={(e) => updateProfile({ mileage: Number(e.target.value) })}
+              <label className="text-xs text-gray-500 block mb-1">Fuel Octane</label>
+              <select
+                value={profile.fuelOctane || 93}
+                onChange={(e) => updateProfile({ fuelOctane: Number(e.target.value) })}
                 className="w-full bg-[#161b22] border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500"
-              />
+              >
+                <option value={87}>87 (Regular)</option>
+                <option value={91}>91 (Premium)</option>
+                <option value={93}>93 (Premium+)</option>
+                <option value={100}>100 (Race)</option>
+              </select>
             </div>
           </div>
         </div>
@@ -128,7 +123,7 @@ export const SettingsPage: React.FC = () => {
             {transmissions.map(tr => (
               <button
                 key={tr.id}
-                onClick={() => updateProfile({ transmission: tr.id })}
+                onClick={() => updateProfile({ transmission: tr.id as any })}
                 className={`p-3 rounded-lg border text-left transition-all ${
                   profile.transmission === tr.id
                     ? 'border-blue-500 bg-blue-500/10'
@@ -160,7 +155,7 @@ export const SettingsPage: React.FC = () => {
             ].map(mod => (
               <button
                 key={mod.key}
-                onClick={() => updateProfile({ [mod.key]: !(profile as any)[mod.key] })}
+                onClick={() => updateProfile({ [mod.key]: !(profile as any)[mod.key] } as any)}
                 className={`w-full flex items-center gap-3 p-3 rounded-lg border text-left transition-all ${
                   (profile as any)[mod.key]
                     ? 'border-green-500/50 bg-green-500/10'
@@ -181,18 +176,6 @@ export const SettingsPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Notes */}
-        <div className="bg-[#0d1117] rounded-xl p-4 border border-gray-800">
-          <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3">Notes</h2>
-          <textarea
-            value={profile.notes}
-            onChange={(e) => updateProfile({ notes: e.target.value })}
-            placeholder="Add notes about your build..."
-            rows={3}
-            className="w-full bg-[#161b22] border border-gray-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500 resize-none"
-          />
-        </div>
-
         {/* About */}
         <div className="bg-[#0d1117] rounded-xl p-4 border border-gray-800 text-center">
           <div className="flex items-center justify-center gap-2 mb-2">
@@ -200,7 +183,7 @@ export const SettingsPage: React.FC = () => {
             <span className="font-semibold text-white">BMW E60 Coder Pro</span>
           </div>
           <p className="text-xs text-gray-500">Complete BMW E60 tuning and diagnostics platform</p>
-          <p className="texttext-gray-600 mt-1">AI-powered tuning with DME safe flash protocols</p>
+          <p className="text-xs text-gray-600 mt-1">AI-powered tuning with DME safe flash protocols</p>
         </div>
       </div>
     </div>
