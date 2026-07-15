@@ -4,7 +4,7 @@ import { ENGINE_SPECS } from '@/lib/engineData';
 import { aiTuningEngine } from '@/lib/aiTuningEngine';
 import {
   Car, Zap, Activity, Settings,
-  Thermometer, Gauge, AlertTriangle, CheckCircle,
+  Thermometer, Gauge, CheckCircle,
   Fuel, Brain, FileText, Cable, ZapOff, Play
 } from 'lucide-react';
 import type { MapType } from '@/types';
