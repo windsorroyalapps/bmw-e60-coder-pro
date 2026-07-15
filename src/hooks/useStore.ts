@@ -6,7 +6,7 @@ import { create } from 'zustand';
 import type {
   MapType, LiveData, LogSession,
   PerformanceMap, VehicleProfile, AiTuneRecommendation, ConnectionStatus,
-  GaugeLayout, FlashBackup, DTCReading
+  GaugeLayout, FlashBackup, DTCReading, AdapterConfig
 } from '@/types';
 import type { OBD2State, FlashSession, CableInfo } from '@/lib/obd2Connection';
 import { aiTuningEngine } from '@/lib/aiTuningEngine';
@@ -70,6 +70,15 @@ interface AppState {
   notifications: { id: string; message: string; type: 'info' | 'success' | 'warning' | 'error' }[];
   addNotification: (n: Omit<AppState['notifications'][0], 'id'>) => void;
   removeNotification: (id: string) => void;
+  // OBD Adapter Selection + Settings
+  selectedAdapterId: string | null;
+  setSelectedAdapterId: (id: string | null) => void;
+  adapterConfigs: Record<string, AdapterConfig>;
+  updateAdapterConfig: (id: string, config: Partial<AdapterConfig>) => void;
+  showAdapterSettings: boolean;
+  setShowAdapterSettings: (v: boolean) => void;
+  scannedAdapter: CableInfo | null;
+  setScannedAdapter: (c: CableInfo | null) => void;
 }
 
 const defaultProfile: VehicleProfile = {
@@ -93,6 +102,58 @@ const defaultObd2: OBD2State = {
   batteryVoltage: 12.6, ignitionState: 'off', engineRunning: false,
   vehicleSpeed: 0, rpm: 0, diagnostics: null, lastError: null,
   lastActivity: 0, autoConnect: true, dmeProtocolVersion: '',
+};
+
+const defaultAdapterConfigs: Record<string, AdapterConfig> = {
+  'inpa_ftdi': {
+    id: 'inpa_ftdi', name: 'BMW INPA K+DCAN (FTDI)', chip: 'FT232R',
+    vid: '0x0403', pid: '0x6001', type: 'k_dcan_ftdi', isGenuine: true,
+    baudRate: 10400, ftdiLatencyTimer: 2, dtrRtsMode: 'kline',
+    protocolPreference: 'auto', connectTimeout: 5000,
+    testerPresentInterval: 2000, description: 'Genuine BMW INPA cable with FTDI FT232R chip. Most reliable for K-Line/D-CAN.',
+  },
+  'ftdi_ft232h': {
+    id: 'ftdi_ft232h', name: 'FTDI FT232H K+DCAN', chip: 'FT232H',
+    vid: '0x0403', pid: '0x6014', type: 'k_dcan_ftdi', isGenuine: false,
+    baudRate: 10400, ftdiLatencyTimer: 1, dtrRtsMode: 'kline',
+    protocolPreference: 'auto', connectTimeout: 5000,
+    testerPresentInterval: 2000, description: 'High-speed FTDI FT232H chip. Supports both K-Line and D-CAN with bus switching.',
+  },
+  'ch340': {
+    id: 'ch340', name: 'K+DCAN Clone (CH340)', chip: 'CH340',
+    vid: '0x1A86', pid: '0x7523', type: 'k_dcan_ch340', isGenuine: false,
+    baudRate: 10400, ftdiLatencyTimer: 16, dtrRtsMode: 'kline',
+    protocolPreference: 'kline', connectTimeout: 8000,
+    testerPresentInterval: 2500, description: 'Common clone cable with CH340 chip. Slower latency timer, best for K-Line only.',
+  },
+  'ch341': {
+    id: 'ch341', name: 'K+DCAN Clone (CH341A)', chip: 'CH341A',
+    vid: '0x1A86', pid: '0x5523', type: 'k_dcan_ch340', isGenuine: false,
+    baudRate: 10400, ftdiLatencyTimer: 16, dtrRtsMode: 'kline',
+    protocolPreference: 'kline', connectTimeout: 8000,
+    testerPresentInterval: 2500, description: 'CH341A variant clone cable. May have timing issues with D-CAN.',
+  },
+  'enet_cp2102': {
+    id: 'enet_cp2102', name: 'ENET Cable (CP2102)', chip: 'CP2102',
+    vid: '0x10C4', pid: '0xEA60', type: 'enet', isGenuine: false,
+    baudRate: 1000000, ftdiLatencyTimer: 16, dtrRtsMode: 'none',
+    protocolPreference: 'dcan', connectTimeout: 3000,
+    testerPresentInterval: 2000, description: 'ENET adapter with Silicon Labs CP2102. For Ethernet-based diagnostics only.',
+  },
+  'bmw_enet': {
+    id: 'bmw_enet', name: 'BMW ENET (Ethernet)', chip: 'N/A',
+    vid: '0x0000', pid: '0x0000', type: 'enet', isGenuine: true,
+    baudRate: 1000000, ftdiLatencyTimer: 16, dtrRtsMode: 'none',
+    protocolPreference: 'dcan', connectTimeout: 3000,
+    testerPresentInterval: 2000, description: 'Direct Ethernet ENET cable for F-series+ compatible E60. Requires RJ45 adapter.',
+  },
+  'custom': {
+    id: 'custom', name: 'Custom Adapter', chip: 'Unknown',
+    vid: '0x0000', pid: '0x0000', type: 'k_dcan_ftdi', isGenuine: false,
+    baudRate: 10400, ftdiLatencyTimer: 2, dtrRtsMode: 'kline',
+    protocolPreference: 'auto', connectTimeout: 5000,
+    testerPresentInterval: 2000, description: 'Manually configured adapter. Set VID/PID and parameters to match your cable.',
+  },
 };
 
 const defaultGaugeLayouts: GaugeLayout[] = [
@@ -243,4 +304,18 @@ export const useStore = create<AppState>((set, get) => ({
   notifications: [],
   addNotification: (n) => set((s) => ({ notifications: [...s.notifications, { ...n, id: `notif_${Date.now()}` }] })),
   removeNotification: (id) => set((s) => ({ notifications: s.notifications.filter(n => n.id !== id) })),
+  // OBD Adapter Selection + Settings
+  selectedAdapterId: null,
+  setSelectedAdapterId: (id) => set({ selectedAdapterId: id }),
+  adapterConfigs: defaultAdapterConfigs,
+  updateAdapterConfig: (id, config) => set((s) => ({
+    adapterConfigs: {
+      ...s.adapterConfigs,
+      [id]: { ...s.adapterConfigs[id], ...config },
+    },
+  })),
+  showAdapterSettings: false,
+  setShowAdapterSettings: (v) => set({ showAdapterSettings: v }),
+  scannedAdapter: null,
+  setScannedAdapter: (c) => set({ scannedAdapter: c }),
 }));
