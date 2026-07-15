@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 
 export const LogsPage: React.FC = () => {
-  const { isLogging, setIsLogging, logEntries, startSession, stopSession } = useStore();
+  const { isLogging, logEntries, startSession, stopSession } = useStore();
   const [selectedSession, setSelectedSession] = useState<string | null>(null);
 
   // Group entries by date (using timestamp date as session key)
