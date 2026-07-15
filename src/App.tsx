@@ -4,6 +4,7 @@ import { obd2Manager } from '@/lib/obd2Connection';
 import { ConnectionBar } from '@/components/ConnectionBar';
 import { FlashModal } from '@/components/FlashModal';
 import { QuickSwitch } from '@/components/QuickSwitch';
+import { OBDAdapterSettings } from '@/components/OBDAdapterSettings';
 import { HomePage } from '@/pages/HomePage';
 import { GaugeDashboard } from '@/components/GaugeDashboard';
 import { TuningPage } from '@/pages/TuningPage';
@@ -31,7 +32,7 @@ const NAV_ITEMS = [
 ];
 
 function App() {
-  const { activeScreen, setActiveScreen, setShowQuickSwitch, obd2, updateLiveData, isLogging, currentSession, addLogEntry, obd2ConnectionPaused } = useStore();
+  const { activeScreen, setActiveScreen, setShowQuickSwitch, obd2, updateLiveData, isLogging, currentSession, addLogEntry, obd2ConnectionPaused, showAdapterSettings } = useStore();
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Enable Android Auto projection
@@ -157,9 +158,10 @@ function App() {
         </div>
       </nav>
 
-      {/* Modals */}
+      {/* Modals / Overlays */}
       <FlashModal />
       <QuickSwitch />
+      {showAdapterSettings && <OBDAdapterSettings />}
     </div>
   );
 }
