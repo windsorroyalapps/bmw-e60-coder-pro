@@ -7,7 +7,7 @@ import {
   Cpu, Zap, Fuel, Gauge, Sparkles, AlertTriangle,
   Check, Info, TrendingUp, Activity
 } from 'lucide-react';
-import type { MapType, InjectorType } from '@/types';
+import type { MapType, InjectorType, VehicleProfile } from '@/types';
 
 const MAP_PRESETS: Record<MapType, { name: string; description: string; hpGain: number; safety: 'safe' | 'moderate' | 'aggressive' }> = {
   stock: { name: 'Stock', description: 'Factory BMW calibration', hpGain: 0, safety: 'safe' },
@@ -49,7 +49,7 @@ export const TuningPage: React.FC = () => {
   const [selectedInjector, setSelectedInjector] = useState<InjectorType>('stock');
 
   const engineSpec = ENGINE_SPECS[profile.engine];
-  const generatedMap = aiTuningEngine.generateMap(profile.engine, profile.currentMap as MapType, selectedInjector, profile);
+  const generatedMap = aiTuningEngine.generateMap(profile.engine, profile.currentMap as MapType, selectedInjector, profile as unknown as VehicleProfile);
   const injectors = getInjectorsForEngine(profile.engine);
   const maxHp = calculateMaxHp(INJECTOR_DATABASE[selectedInjector]?.flowRateCc || 630, 85, engineSpec.cylinders, engineSpec.fuelType);
   const requiredCc = calculateRequiredInjectorCc(maxHp, engineSpec.cylinders, 0.85, engineSpec.fuelType);
