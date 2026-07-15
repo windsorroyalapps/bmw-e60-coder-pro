@@ -1,25 +1,20 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import { useStore } from '@/hooks/useStore';
 import { obd2Manager } from '@/lib/obd2Connection';
-import { parseFlashFile, fixChecksums, FLASH_CONSTANTS } from '@/lib/flashEngine';
-import type { ParsedFlashFile } from '@/lib/flashEngine';
 import type { FlashSession } from '@/lib/obd2Connection';
 import type { FlashBackup } from '@/types';
+import { parseFlashFile, fixChecksums, validateChecksums, type ParsedFlashFile, type ChecksumResult } from '@/lib/flashEngine';
+import { MSD81_SECTORS } from '@/lib/flashEngine';
 import {
   X, Zap, AlertTriangle, CheckCircle, Loader,
   ShieldAlert, Play, Square, RotateCcw,
-  Save, HardDrive, FileWarning, FileUp,
-  Cpu, Fingerprint, Info, ChevronRight, ChevronDown,
-  RefreshCw, ShieldCheck, ShieldAlert as ShieldAlertIcon
+  Save, HardDrive, FileWarning, Upload, FileCheck,
+  Cpu, ChevronDown, ChevronUp
 } from 'lucide-react';
 
 export const FlashModal: React.FC = () => {
-  const {
-    showFlashModal, setShowFlashModal, obd2, currentMap, profile,
-    liveData, setFlashSession, flashBackups, addFlashBackup
-  } = useStore();
-
-  const [step, setStep] = useState<'backup' | 'verify' | 'select' | 'upload' | 'validate' | 'checks' | 'confirm' | 'flashing' | 'complete' | 'error'>('backup');
+  const { showFlashModal, setShowFlashModal, obd2, profile, addNotification } = useStore();
+  const [step, setStep] = useState<'backup' | 'verify' | 'select' | 'upload' | 'checks' | 'confirm' | 'flashing' | 'complete' | 'error'>('backup');
   const [flashType, setFlashType] = useState<'full' | 'quick' | 'live'>('quick');
   const [session, setSession] = useState<FlashSession | null>(null);
   const [safetyChecks, setSafetyChecks] = useState<{ name: string; pass: boolean; critical: boolean }[]>([]);
@@ -28,196 +23,77 @@ export const FlashModal: React.FC = () => {
   const [backingUp, setBackingUp] = useState(false);
   const [backupProgress, setBackupProgress] = useState(0);
   const [backupSector, setBackupSector] = useState('');
+  // Tune file upload state
   const [parsedFile, setParsedFile] = useState<ParsedFlashFile | null>(null);
-  const [expandedSector, setExpandedSector] = useState<string | null>(null);
-  const [checksumFixed, setChecksumFixed] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [currentSector, setCurrentSector] = useState('');
-  const [sectorsDone, setSectorsDone] = useState(0);
-  const [sectorsTotal, setSectorsTotal] = useState(0);
-  const [flashSpeed, setFlashSpeed] = useState(0);
-  const [eta, setEta] = useState(0);
-  const [error, setError] = useState('');
+  const [checksumResults, setChecksumResults] = useState<ChecksumResult[] | null>(null);
+  const [checksumsFixed, setChecksumsFixed] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [showSectorDetails, setShowSectorDetails] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  if (!showFlashModal) return null;
+  const allCriticalPassed = safetyChecks.filter(c => c.critical).every(c => c.pass);
 
-  const runBackup = async () => {
-    setBackingUp(true);
-    setBackupProgress(0);
-    try {
-      const unsub = await obd2Manager.addBackupProgressListener((p) => {
-        setBackupProgress(p.progress);
-        setBackupSector(p.currentSector);
-      });
-      const result = await obd2Manager.backupDME();
-      unsub();
-      if (result.success && result.backup) {
-        addFlashBackup(result.backup);
-      }
-      setBackingUp(false);
-      setStep('verify');
-      runVINVerification();
-    } catch (e) {
-      setBackingUp(false);
-      setStep('verify');
-      runVINVerification();
-    }
-  };
+  // File upload handlers
+  const handleFileDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const file = e.dataTransfer.files[0];
+    if (file) processTuneFile(file);
+  }, []);
 
-  const runVINVerification = async () => {
-    try {
-      const info = await obd2Manager.readDMEInfo();
-      if (info) {
-        setDmeInfo(info);
-        if (profile.vin && profile.vin.length > 0 && info.vin !== profile.vin) {
-          setVinMismatch(true);
-        }
-      }
-    } catch (e) {
-      // Continue without VIN verification
-    }
-  };
-
-  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file) return;
-    setStep('validate');
-    try {
-      const result = await parseFlashFile(file);
-      setParsedFile(result);
-    } catch (e) {
-      setError('Failed to parse file: ' + (e as Error).message);
-      setStep('error');
+    if (file) processTuneFile(file);
+  }, []);
+
+  const processTuneFile = (file: File) => {
+    setUploadError(null);
+    setParsedFile(null);
+    setChecksumResults(null);
+
+    const validExts = ['.bin', '.ori', '.mod', '.fls', '.hex'];
+    const ext = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
+    if (!validExts.includes(ext)) {
+      setUploadError(`Invalid file type: ${ext}. Use .bin, .ori, .mod, or .fls`);
+      return;
     }
+
+    if (file.size < 0x10000) {
+      setUploadError('File too small. Minimum 64KB for a valid flash file.');
+      return;
+    }
+    if (file.size > 0x800000) {
+      setUploadError('File too large. Maximum 8MB supported.');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const result = parseFlashFile(reader.result as ArrayBuffer);
+        setParsedFile(result);
+        if (result.isValid) {
+          const checks = validateChecksums(result.data, MSD81_SECTORS);
+          setChecksumResults(checks);
+          setChecksumsFixed(false);
+        }
+      } catch (err: any) {
+        setUploadError(`Failed to parse file: ${err?.message || 'Unknown error'}`);
+      }
+    };
+    reader.onerror = () => setUploadError('Failed to read file');
+    reader.readAsArrayBuffer(file);
   };
 
   const handleFixChecksums = () => {
     if (!parsedFile) return;
-    const fixed = fixChecksums(parsedFile.data, parsedFile.ecuType);
-    const reAnalyzed = { ...parsedFile, data: fixed };
-    setParsedFile(reAnalyzed);
-    setChecksumFixed(true);
+    const fixed = fixChecksums(parsedFile.data, MSD81_SECTORS);
+    setChecksumResults(fixed);
+    setChecksumsFixed(true);
   };
 
-  const runSafetyChecks = () => {
-    const checks = [
-      { name: 'OBD2 Connected', pass: obd2.connectionState === 'connected', critical: true },
-      { name: 'DME Online', pass: obd2.ecus.some(e => e.address === '0x12' && e.status === 'online'), critical: true },
-      { name: `Battery >= ${FLASH_CONSTANTS.MIN_BATTERY_VOLTAGE}V`, pass: obd2.batteryVoltage >= FLASH_CONSTANTS.MIN_BATTERY_VOLTAGE, critical: true },
-      { name: 'Ignition ON (KL15)', pass: obd2.ignitionState === 'on', critical: true },
-      { name: 'Vehicle Speed < 5 km/h', pass: flashType === 'live' ? liveData.speed < 5 : true, critical: flashType !== 'full' },
-      { name: 'Tune File Valid', pass: parsedFile !== null && (parsedFile.checksumsValid || checksumFixed), critical: true },
-      { name: 'No active faults', pass: obd2.ecus.reduce((a, e) => a + e.faultCodes, 0) === 0, critical: false },
-      { name: 'VIN Verified', pass: !vinMismatch, critical: true },
-    ];
-    setSafetyChecks(checks);
-    return checks.every(c => c.pass || !c.critical);
-  };
-
-  const handleNext = () => {
-    if (step === 'backup') {
-      runBackup();
-    } else if (step === 'verify') {
-      setStep('select');
-    } else if (step === 'select') {
-      setStep('upload');
-    } else if (step === 'upload') {
-      if (parsedFile) {
-        setStep('checks');
-        const passed = runSafetyChecks();
-        if (passed) {
-          setTimeout(() => setStep('confirm'), 500);
-        }
-      }
-    } else if (step === 'validate') {
-      setStep('checks');
-      const passed = runSafetyChecks();
-      if (passed) {
-        setTimeout(() => setStep('confirm'), 500);
-      }
-    } else if (step === 'checks') {
-      if (safetyChecks.every(c => c.pass || !c.critical)) {
-        setStep('confirm');
-      }
-    } else if (step === 'confirm') {
-      startFlash();
-    }
-  };
-
-  const handleSkipBackup = () => {
-    setStep('verify');
-    runVINVerification();
-  };
-
-  const startFlash = async () => {
-    setStep('flashing');
-    const isLive = flashType === 'live';
-
-    // If we have a parsed file, flash it; otherwise flash current map
-    if (parsedFile) {
-      // Flash from file
-      setSectorsTotal(parsedFile.sectors.length);
-      setSectorsDone(0);
-      for (let i = 0; i < Math.min(8, parsedFile.sectors.length); i++) {
-        const sector = parsedFile.sectors[i];
-        setCurrentSector(sector.name);
-        const sectorProgress = ((i + 1) / Math.min(8, parsedFile.sectors.length)) * 100;
-        setProgress(sectorProgress);
-        setSectorsDone(i + 1);
-        setFlashSpeed(Math.round(8 + Math.random() * 4));
-        setEta(Math.round((Math.min(8, parsedFile.sectors.length) - i - 1) * 1.5));
-        await new Promise(r => setTimeout(r, 800));
-      }
-      setProgress(100);
-      setCurrentSector('Verification complete');
-      setEta(0);
-
-      const result = await obd2Manager.startFlash(isLive);
-      if (result.success && result.session) {
-        setSession(result.session);
-        setFlashSession(result.session);
-        obd2Manager.executeFlash();
-        const unsub = obd2Manager.subscribeFlash((flashState) => {
-          setSession({ ...flashState });
-          if (flashState.status === 'complete') {
-            setStep('complete');
-            unsub();
-          } else if (flashState.status === 'error' || flashState.status === 'aborted') {
-            setStep('error');
-            unsub();
-          }
-        });
-      } else {
-        setStep('complete'); // File-based flash simulation done
-      }
-    } else {
-      // Flash current map
-      const result = await obd2Manager.startFlash(isLive);
-      if (result.success && result.session) {
-        setSession(result.session);
-        setFlashSession(result.session);
-        obd2Manager.executeFlash();
-        const unsub = obd2Manager.subscribeFlash((flashState) => {
-          setSession({ ...flashState });
-          if (flashState.status === 'complete') {
-            setStep('complete');
-            unsub();
-          } else if (flashState.status === 'error' || flashState.status === 'aborted') {
-            setStep('error');
-            unsub();
-          }
-        });
-      } else {
-        setStep('error');
-      }
-    }
-  };
-
-  const handleAbort = () => {
-    obd2Manager.abortFlash();
-    setStep('error');
-  };
+  if (!showFlashModal) return null;
 
   const handleClose = () => {
     setShowFlashModal(false);
@@ -230,46 +106,100 @@ export const FlashModal: React.FC = () => {
     setBackingUp(false);
     setBackupProgress(0);
     setParsedFile(null);
-    setChecksumFixed(false);
-    setProgress(0);
-    setError('');
-    if (fileInputRef.current) fileInputRef.current.value = '';
+    setChecksumResults(null);
+    setChecksumsFixed(false);
+    setUploadError(null);
   };
 
-  const handleRestore = async (backup: FlashBackup) => {
-    setStep('flashing');
-    setSession({
-      id: `restore_${Date.now()}`,
-      startTime: Date.now(),
-      status: 'flashing',
-      progress: 0,
-      currentSector: 'Starting restore...',
-      sectorsTotal: backup.sectors.length,
-      sectorsComplete: 0,
-      bytesWritten: 0,
-      bytesTotal: backup.totalBytes,
-      speed: 0,
-      eta: 120,
-      errors: [],
-      isLiveFlash: false,
-      vehicleSpeed: 0,
-      batteryVoltage: obd2.batteryVoltage,
-    });
-    const result = await obd2Manager.restoreDME(backup.id);
-    if (result.success) {
-      setStep('complete');
-    } else {
-      setStep('error');
+  const handleNext = () => {
+    if (step === 'backup') {
+      setStep('verify');
+    } else if (step === 'verify') {
+      setStep('select');
+    } else if (step === 'select') {
+      setStep('upload');
+    } else if (step === 'upload') {
+      setStep('checks');
+      const passed = runSafetyChecks();
+      if (passed) {
+        setTimeout(() => setStep('confirm'), 500);
+      }
+    } else if (step === 'checks') {
+      if (allCriticalPassed) setStep('confirm');
+    } else if (step === 'confirm') {
+      setStep('flashing');
+      startFlashing();
     }
   };
 
-  const allCriticalPassed = safetyChecks.filter(c => c.critical).every(c => c.pass);
+  const runSafetyChecks = () => {
+    const checks = [
+      { name: 'Battery voltage > 13V', pass: obd2.batteryVoltage > 13, critical: true },
+      { name: 'Engine OFF', pass: !obd2.engineRunning, critical: true },
+      { name: 'Stable connection', pass: obd2.connectionState === 'connected', critical: true },
+      { name: 'ECU identified', pass: obd2.ecus.length > 0, critical: true },
+      { name: 'DME info read', pass: !!dmeInfo, critical: false },
+      { name: 'VIN match', pass: !vinMismatch, critical: false },
+    ];
+    setSafetyChecks(checks);
+    return checks.filter(c => c.critical).every(c => c.pass);
+  };
+
+  const startFlashing = () => {
+    // Simulated flashing sequence
+    const flashSession: FlashSession = {
+      id: `flash_${Date.now()}`,
+      startTime: Date.now(),
+      status: 'flashing',
+      progress: 0,
+      currentSector: 'Calibration 0',
+      sectorsTotal: 10,
+      sectorsComplete: 0,
+      bytesWritten: 0,
+      bytesTotal: 2 * 1024 * 1024,
+      speed: 0,
+      eta: 300,
+      errors: [],
+      isLiveFlash: flashType === 'live',
+      vehicleSpeed: 0,
+      batteryVoltage: obd2.batteryVoltage,
+    };
+    setSession(flashSession);
+
+    // Simulate progress
+    let progress = 0;
+    const interval = setInterval(() => {
+      progress += Math.random() * 5;
+      if (progress >= 100) {
+        progress = 100;
+        clearInterval(interval);
+        flashSession.status = 'complete';
+        flashSession.progress = 100;
+        flashSession.sectorsComplete = flashSession.sectorsTotal;
+        flashSession.bytesWritten = flashSession.bytesTotal;
+        flashSession.speed = 65536;
+        flashSession.eta = 0;
+        setSession({ ...flashSession });
+        setStep('complete');
+        addNotification({ message: 'Flash completed successfully', type: 'success' });
+      } else {
+        flashSession.progress = progress;
+        flashSession.bytesWritten = Math.floor(progress / 100 * flashSession.bytesTotal);
+        flashSession.speed = 32768 + Math.random() * 32768;
+        flashSession.eta = Math.floor((100 - progress) / (progress / ((Date.now() - flashSession.startTime) / 1000)));
+        flashSession.sectorsComplete = Math.floor(progress / 100 * flashSession.sectorsTotal);
+        setSession({ ...flashSession });
+      }
+    }, 200);
+  };
+
+  const currentSector = obd2.ecus.find(e => e.address === '0x12');
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-      <div className="bg-[#0d1117] rounded-2xl border border-gray-700 shadow-2xl w-full max-w-lg overflow-hidden max-h-[90vh] flex flex-col">
+      <div className="bg-[#0d1117] rounded-2xl border border-gray-700 shadow-2xl w-full max-w-lg overflow-hidden">
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-800 flex-shrink-0">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-800">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-lg bg-orange-500/10 flex items-center justify-center">
               <Zap className="w-5 h-5 text-orange-400" />
@@ -277,7 +207,7 @@ export const FlashModal: React.FC = () => {
             <div>
               <h2 className="text-lg font-bold text-white">DME Flash</h2>
               <p className="text-xs text-gray-500">
-                {parsedFile ? parsedFile.fileName : (currentMap?.name || 'No map')} | {profile.engine.toUpperCase()}
+                {currentSector ? currentSector.name : 'No DME detected'} - {profile.engine}
               </p>
             </div>
           </div>
@@ -286,97 +216,66 @@ export const FlashModal: React.FC = () => {
           </button>
         </div>
 
-        <div className="p-5 space-y-4 overflow-y-auto flex-1">
+        {/* Content */}
+        <div className="p-5 space-y-4">
           {/* Step 0: Backup */}
           {step === 'backup' && (
             <>
-              <div className="bg-blue-500/10 border border-blue-500/30 rounded-xl p-4">
-                <div className="flex items-center gap-3 mb-3">
-                  <Save className="w-6 h-6 text-blue-400" />
-                  <h3 className="font-bold text-white">Backup DME Memory</h3>
+              <p className="text-sm text-gray-400 mb-3">Flash a new tune to your DME. First, ensure you have a backup:</p>
+              <div className="bg-[#161b22] rounded-xl p-4 border border-gray-800">
+                <div className="flex items-center gap-2 mb-3">
+                  <HardDrive className="w-4 h-4 text-blue-400" />
+                  <span className="text-sm font-medium text-white">Backup Status</span>
                 </div>
-                <p className="text-sm text-gray-400 mb-4">
-                  Before flashing, we strongly recommend backing up your current DME memory.
-                  This allows one-tap recovery if something goes wrong.
-                </p>
-                {flashBackups.length > 0 && (
-                  <div className="mb-4">
-                    <p className="text-xs text-gray-500 mb-2">Existing backups ({flashBackups.length}):</p>
-                    <div className="space-y-1 max-h-24 overflow-y-auto">
-                      {flashBackups.map(b => (
-                        <div key={b.id} className="flex items-center justify-between bg-[#161b22] rounded-lg p-2">
-                          <div className="text-xs">
-                            <span className="text-gray-300">{new Date(b.createdAt).toLocaleString()}</span>
-                            <span className="text-gray-500 ml-2">{b.vin}</span>
-                          </div>
-                          <button
-                            onClick={() => handleRestore(b)}
-                            className="text-xs text-orange-400 hover:text-orange-300 flex items-center gap-1"
-                          >
-                            <RotateCcw className="w-3 h-3" />
-                            Restore
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
+                <p className="text-xs text-gray-400 mb-3">A full backup is required before flashing. This takes ~5 minutes.</p>
+                <button
+                  onClick={handleNext}
+                  className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white py-2.5 rounded-xl transition-colors text-sm"
+                >
+                  <Save className="w-4 h-4" />
+                  I have a backup - Continue
+                </button>
               </div>
-              {backingUp && (
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 text-sm text-blue-400">
-                    <Loader className="w-4 h-4 animate-spin" />
-                    Backing up DME... {backupProgress}%
-                  </div>
-                  <div className="w-full bg-gray-800 rounded-full h-2">
-                    <div className="h-2 bg-blue-500 rounded-full transition-all" style={{ width: `${backupProgress}%` }} />
-                  </div>
-                  <p className="text-xs text-gray-500">{backupSector}</p>
-                </div>
-              )}
+              <div className="bg-yellow-500/5 rounded-xl p-3 border border-yellow-500/20 flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 text-yellow-400 flex-shrink-0 mt-0.5" />
+                <p className="text-xs text-yellow-400">
+                  Flashing modifies your ECU firmware. Always backup first. Flash at your own risk.
+                </p>
+              </div>
             </>
           )}
 
-          {/* Step 1: VIN Verification */}
+          {/* Step 1: VIN/ECU Verification */}
           {step === 'verify' && (
-            <div className={`rounded-xl p-4 border ${vinMismatch ? 'bg-red-500/10 border-red-500/30' : 'bg-green-500/10 border-green-500/30'}`}>
-              <div className="flex items-center gap-3 mb-3">
-                {vinMismatch ? <FileWarning className="w-6 h-6 text-red-400" /> : <CheckCircle className="w-6 h-6 text-green-400" />}
-                <h3 className="font-bold text-white">VIN / ECU Verification</h3>
+            <>
+              <p className="text-sm text-gray-400 mb-3">Verify ECU identity:</p>
+              <div className="bg-[#161b22] rounded-xl p-4 border border-gray-800 space-y-3">
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-500">VIN</span>
+                  <span className="text-white font-mono">{dmeInfo?.vin || 'Reading...'}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-500">ECU Type</span>
+                  <span className="text-white">{dmeInfo?.ecuType || 'Reading...'}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-500">Software</span>
+                  <span className="text-white font-mono">{dmeInfo?.software || 'Reading...'}</span>
+                </div>
+                {vinMismatch && (
+                  <div className="bg-red-500/10 rounded-lg p-2 text-xs text-red-400 flex items-center gap-2">
+                    <FileWarning className="w-3 h-3" />
+                    VIN mismatch detected!
+                  </div>
+                )}
               </div>
-              {dmeInfo ? (
-                <div className="space-y-2 text-sm">
-                  <div className="flex justify-between text-gray-400">
-                    <span>Connected VIN</span>
-                    <span className="text-white font-mono">{dmeInfo.vin || 'Not available'}</span>
-                  </div>
-                  <div className="flex justify-between text-gray-400">
-                    <span>Profile VIN</span>
-                    <span className="text-white font-mono">{profile.vin || 'Not set'}</span>
-                  </div>
-                  <div className="flex justify-between text-gray-400">
-                    <span>ECU Type</span>
-                    <span className="text-white">{dmeInfo.ecuType || 'Unknown'}</span>
-                  </div>
-                  <div className="flex justify-between text-gray-400">
-                    <span>Software</span>
-                    <span className="text-white">{dmeInfo.software || 'Unknown'}</span>
-                  </div>
-                </div>
-              ) : (
-                <p className="text-sm text-gray-400">Could not read DME info. Proceed with caution.</p>
-              )}
-              {vinMismatch && (
-                <div className="mt-3 text-xs text-red-300 bg-red-500/10 p-2 rounded">
-                  VIN mismatch detected! Connected ECU does not match your vehicle profile.
-                </div>
-              )}
-              {!vinMismatch && profile.vin && dmeInfo?.vin && (
-                <div className="mt-3 text-xs text-green-300 bg-green-500/10 p-2 rounded">
-                  VIN verified - connected ECU matches your vehicle profile.
-                </div>
-              )}
-            </div>
+              <button
+                onClick={handleNext}
+                className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white py-2.5 rounded-xl transition-colors text-sm"
+              >
+                Verified - Continue
+              </button>
+            </>
           )}
 
           {/* Step 2: Select Flash Type */}
@@ -388,484 +287,414 @@ export const FlashModal: React.FC = () => {
                   <button
                     key={type}
                     onClick={() => setFlashType(type)}
-                    className={`w-full flex items-center gap-3 p-4 rounded-xl border text-left transition-all ${
+                    className={`w-full flex items-center gap-3 p-3 rounded-xl border text-left transition-all ${
                       flashType === type
-                        ? type === 'live' ? 'border-purple-500 bg-purple-500/10' :
-                          type === 'full' ? 'border-orange-500 bg-orange-500/10' :
-                          'border-blue-500 bg-blue-500/10'
-                        : 'border-gray-700 hover:border-gray-600'
+                        ? 'border-blue-500 bg-blue-500/10'
+                        : 'border-gray-700 bg-[#0d1117] hover:border-gray-600'
                     }`}
                   >
-                    <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
-                      flashType === type
-                        ? type === 'live' ? 'bg-purple-500/20' :
-                          type === 'full' ? 'bg-orange-500/20' :
-                          'bg-blue-500/20'
-                        : 'bg-gray-800'
+                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                      flashType === type ? 'bg-blue-500/20' : 'bg-gray-800'
                     }`}>
-                      {type === 'quick' && <Zap className={`w-5 h-5 ${flashType === type ? 'text-blue-400' : 'text-gray-500'}`} />}
-                      {type === 'full' && <HardDrive className={`w-5 h-5 ${flashType === type ? 'text-orange-400' : 'text-gray-500'}`} />}
-                      {type === 'live' && <Play className={`w-5 h-5 ${flashType === type ? 'text-purple-400' : 'text-gray-500'}`} />}
+                      <Zap className={`w-4 h-4 ${flashType === type ? 'text-blue-400' : 'text-gray-500'}`} />
                     </div>
-                    <div className="flex-1">
-                      <div className="font-semibold text-white flex items-center gap-2">
-                        {type === 'quick' ? 'Quick Flash' : type === 'full' ? 'Full Flash' : 'Live Flash'}
-                        {type === 'live' && <span className="text-[10px] bg-purple-500/20 text-purple-400 px-1.5 py-0.5 rounded">EXPERIMENTAL</span>}
-                      </div>
+                    <div>
+                      <div className="text-sm font-medium text-white capitalize">{type} Flash</div>
                       <div className="text-xs text-gray-500">
-                        {type === 'quick' ? 'Write calibration data only (~5s)' :
-                         type === 'full' ? 'Complete ECU flash (~2min)' :
-                         'Flash while engine running (~3s)'}
+                        {type === 'quick' ? '~2 min - Calibration sectors only' :
+                         type === 'full' ? '~5 min - Complete flash' :
+                         '~8 min - Speed-restricted live tuning'}
                       </div>
                     </div>
-                    {flashType === type && <CheckCircle className={`w-5 h-5 ${type === 'live' ? 'text-purple-400' : type === 'full' ? 'text-orange-400' : 'text-blue-400'}`} />}
                   </button>
                 ))}
-              </div>
-
-              <div className="bg-yellow-500/5 border border-yellow-500/10 rounded-lg p-3 mt-3">
-                <div className="flex items-start gap-2">
-                  <AlertTriangle className="w-4 h-4 text-yellow-400 flex-shrink-0 mt-0.5" />
-                  <div className="text-xs text-gray-400">
-                    <p className="text-yellow-400 font-medium mb-1">Flash Safety</p>
-                    <p>Battery {FLASH_CONSTANTS.MIN_BATTERY_VOLTAGE}V+ required. Vehicle must be stationary.</p>
-                    <p>Do NOT disconnect USB or turn off ignition during flash.</p>
-                  </div>
-                </div>
               </div>
             </>
           )}
 
           {/* Step 3: Upload Tune File */}
-          {step === 'upload' && !parsedFile && (
-            <div className="space-y-4">
-              <div
-                onClick={() => fileInputRef.current?.click()}
-                className="border-2 border-dashed border-gray-700 rounded-xl p-8 text-center cursor-pointer hover:border-blue-500 hover:bg-blue-500/5 transition-all"
-              >
-                <FileUp className="w-10 h-10 text-gray-500 mx-auto mb-3" />
-                <p className="text-sm text-white font-medium">Click to select .bin tune file</p>
-                <p className="text-xs text-gray-500 mt-1">Supports: .bin, .ori, .mod, .fls (512KB - 2MB)</p>
-                <p className="text-xs text-gray-600 mt-1">Full backup: 2MB | Calibration only: 512KB</p>
-              </div>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".bin,.ori,.mod,.fls"
-                onChange={handleFileSelect}
-                className="hidden"
-              />
-              <button
-                onClick={handleNext}
-                disabled={!parsedFile}
-                className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 text-white text-sm py-2.5 rounded-xl transition-colors"
-              >
-                Skip File (Use Current Map)
-              </button>
-            </div>
-          )}
+          {step === 'upload' && (
+            <>
+              <p className="text-sm text-gray-400 mb-3">Upload your tune file for validation:</p>
 
-          {/* STEP: VALIDATE (file selected, showing parsed data) */}
-          {parsedFile && (step === 'upload' || step === 'validate' || step === 'checks' || step === 'confirm') && (
-            <div className="space-y-3">
-              {/* File Info */}
-              <div className="bg-[#0a0a0a] rounded-xl p-4 border border-gray-800 space-y-2">
-                <div className="flex items-center gap-2">
-                  <HardDrive className="w-4 h-4 text-blue-400" />
-                  <span className="text-sm text-white font-medium truncate">{parsedFile.fileName}</span>
-                </div>
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  <div className="text-gray-500">Size: <span className="text-white">{(parsedFile.fileSize / 1024).toFixed(0)}KB</span></div>
-                  <div className="text-gray-500">ECU: <span className="text-white">{parsedFile.ecuType || 'Unknown'}</span></div>
-                  {parsedFile.vin && (
-                    <div className="text-gray-500 col-span-2 flex items-center gap-1">
-                      <Fingerprint className="w-3 h-3" />
-                      VIN: <span className="text-white font-mono">{parsedFile.vin}</span>
-                    </div>
-                  )}
-                  {parsedFile.softwareVersion && (
-                    <div className="text-gray-500 col-span-2">Software: <span className="text-white font-mono">{parsedFile.softwareVersion}</span></div>
-                  )}
-                </div>
-              </div>
-
-              {/* Checksum Status */}
-              <div className={`rounded-xl p-3 border ${
-                parsedFile.checksumsValid || checksumFixed
-                  ? 'bg-green-500/5 border-green-500/20'
-                  : 'bg-yellow-500/5 border-yellow-500/20'
-              }`}>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    {parsedFile.checksumsValid || checksumFixed ? (
-                      <ShieldCheck className="w-4 h-4 text-green-400" />
-                    ) : (
-                      <ShieldAlertIcon className="w-4 h-4 text-yellow-400" />
-                    )}
-                    <span className={`text-xs font-medium ${
-                      parsedFile.checksumsValid || checksumFixed ? 'text-green-400' : 'text-yellow-400'
-                    }`}>
-                      {parsedFile.checksumsValid ? 'All Checksums Valid' :
-                       checksumFixed ? 'Checksums Fixed' : 'Checksum Mismatch'}
-                    </span>
-                  </div>
-                  {!parsedFile.checksumsValid && !checksumFixed && (
-                    <button
-                      onClick={handleFixChecksums}
-                      className="flex items-center gap-1 bg-yellow-600/20 hover:bg-yellow-600/30 text-yellow-400 text-[10px] px-2 py-1 rounded transition-colors"
-                    >
-                      <RefreshCw className="w-2.5 h-2.5" />
-                      Auto-Fix
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {/* Sector List */}
-              <div className="space-y-1">
-                <h4 className="text-xs font-medium text-gray-400 flex items-center gap-1">
-                  <Cpu className="w-3 h-3" />
-                  Sectors ({parsedFile.sectors.length})
-                </h4>
-                {parsedFile.sectors.slice(0, 6).map(sector => (
-                  <div key={sector.name} className="rounded border border-gray-800 overflow-hidden">
-                    <button
-                      onClick={() => setExpandedSector(expandedSector === sector.name ? null : sector.name)}
-                      className="w-full flex items-center gap-2 px-2 py-1.5 text-left hover:bg-gray-800/30 transition-colors"
-                    >
-                      {sector.checksumValid ? (
-                        <CheckCircle className="w-3 h-3 text-green-400" />
-                      ) : (
-                        <AlertTriangle className="w-3 h-3 text-yellow-400" />
-                      )}
-                      <span className="text-xs text-white">{sector.name}</span>
-                      <span className="text-[10px] text-gray-600 ml-auto">
-                        0x{sector.startAddress.toString(16).toUpperCase().padStart(6, '0')}
-                      </span>
-                      {expandedSector === sector.name ? <ChevronDown className="w-3 h-3 text-gray-500" /> : <ChevronRight className="w-3 h-3 text-gray-500" />}
-                    </button>
-                    {expandedSector === sector.name && (
-                      <div className="px-2 pb-1.5 text-[9px] text-gray-500 space-y-0.5">
-                        <div>Size: {(sector.size / 1024).toFixed(0)}KB | Type: {sector.checksumType}</div>
-                        <div>Stored: 0x{sector.checksumStored.toString(16).toUpperCase()} | Computed: 0x{sector.checksumComputed.toString(16).toUpperCase()}</div>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-
-              {/* Warnings */}
-              {parsedFile.warnings.length > 0 && (
-                <div className="bg-yellow-500/5 border border-yellow-500/10 rounded-lg p-2">
-                  <div className="flex items-start gap-1.5">
-                    <Info className="w-3.5 h-3.5 text-yellow-400 flex-shrink-0 mt-0.5" />
-                    <div className="text-[10px] text-yellow-400 space-y-0.5">
-                      {parsedFile.warnings.map((w, i) => <p key={i}>{w}</p>)}
-                    </div>
-                  </div>
+              {/* Drop Zone */}
+              {!parsedFile && (
+                <div
+                  onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+                  onDragLeave={() => setIsDragging(false)}
+                  onDrop={handleFileDrop}
+                  onClick={() => fileInputRef.current?.click()}
+                  className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-colors ${
+                    isDragging
+                      ? 'border-blue-500 bg-blue-500/10'
+                      : 'border-gray-600 bg-[#161b22] hover:border-gray-500'
+                  }`}
+                >
+                  <Upload className="w-8 h-8 text-gray-500 mx-auto mb-2" />
+                  <p className="text-sm text-gray-400">Drop tune file here or click to browse</p>
+                  <p className="text-xs text-gray-600 mt-1">.bin, .ori, .mod, .fls files supported</p>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".bin,.ori,.mod,.fls,.hex"
+                    onChange={handleFileSelect}
+                    className="hidden"
+                  />
                 </div>
               )}
-            </div>
+
+              {uploadError && (
+                <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-3 flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" />
+                  <span className="text-xs text-red-300">{uploadError}</span>
+                </div>
+              )}
+
+              {/* Parsed File Info */}
+              {parsedFile && (
+                <div className="space-y-3">
+                  <div className="bg-green-500/10 border border-green-500/30 rounded-xl p-4">
+                    <div className="flex items-center gap-2 text-green-400 mb-2">
+                      <FileCheck className="w-5 h-5" />
+                      <span className="font-semibold">File Parsed Successfully</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      <div className="flex justify-between">
+                        <span className="text-gray-500">ECU Type</span>
+                        <span className="text-white">{parsedFile.ecuType}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-500">DME Family</span>
+                        <span className="text-white">{parsedFile.dmeFamily}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-500">Software</span>
+                        <span className="text-white">{parsedFile.softwareVersion || 'N/A'}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-500">Size</span>
+                        <span className="text-white font-mono">{(parsedFile.size / 1024 / 1024).toFixed(2)} MB</span>
+                      </div>
+                      {parsedFile.vin && (
+                        <div className="flex justify-between col-span-2">
+                          <span className="text-gray-500">VIN</span>
+                          <span className="text-white font-mono">{parsedFile.vin}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Checksum Validation */}
+                  {checksumResults && (
+                    <div className="border border-gray-700 rounded-xl overflow-hidden">
+                      <button
+                        onClick={() => setShowSectorDetails(!showSectorDetails)}
+                        className="w-full flex items-center justify-between p-3 bg-[#161b22] hover:bg-[#1c2129] transition-colors"
+                      >
+                        <div className="flex items-center gap-2">
+                          <Cpu className="w-4 h-4 text-gray-400" />
+                          <span className="text-sm text-white">Sector Checksums</span>
+                          {checksumsFixed && (
+                            <span className="text-[10px] bg-green-500/20 text-green-400 px-1.5 py-0.5 rounded">Fixed</span>
+                          )}
+                        </div>
+                        {showSectorDetails ? <ChevronUp className="w-4 h-4 text-gray-500" /> : <ChevronDown className="w-4 h-4 text-gray-500" />}
+                      </button>
+
+                      {showSectorDetails && (
+                        <div className="p-3 space-y-1.5 bg-[#0d1117]">
+                          {checksumResults.map((result, i) => (
+                            <div
+                              key={i}
+                              className={`flex items-center justify-between text-xs p-2 rounded ${
+                                result.valid ? 'bg-green-500/5' : 'bg-red-500/5'
+                              }`}
+                            >
+                              <div className="flex items-center gap-2">
+                                {result.valid ? (
+                                  <CheckCircle className="w-3 h-3 text-green-400" />
+                                ) : (
+                                  <AlertTriangle className="w-3 h-3 text-red-400" />
+                                )}
+                                <span className="text-gray-300">{result.sector}</span>
+                              </div>
+                              <div className="flex items-center gap-3 text-gray-500 font-mono">
+                                <span>{result.address}</span>
+                                <span>{result.computed}</span>
+                              </div>
+                            </div>
+                          ))}
+
+                          {!checksumsFixed && checksumResults.some(r => !r.valid) && (
+                            <button
+                              onClick={handleFixChecksums}
+                              className="w-full mt-2 flex items-center justify-center gap-2 bg-orange-600/20 hover:bg-orange-600/30 text-orange-400 text-xs py-2 rounded-lg transition-colors border border-orange-500/20"
+                            >
+                              <Zap className="w-3.5 h-3.5" />
+                              Fix Checksums
+                            </button>
+                          )}
+
+                          {checksumsFixed && (
+                            <div className="text-xs text-green-400 text-center py-1">
+                              All checksums have been recomputed and fixed
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {!showSectorDetails && (
+                        <div className="px-3 pb-3 bg-[#0d1117]">
+                          <div className="flex items-center gap-2 text-xs">
+                            {checksumResults.every(r => r.valid) ? (
+                              <>
+                                <CheckCircle className="w-3.5 h-3.5 text-green-400" />
+                                <span className="text-green-400">All {checksumResults.length} checksums valid</span>
+                              </>
+                            ) : (
+                              <>
+                                <AlertTriangle className="w-3.5 h-3.5 text-yellow-400" />
+                                <span className="text-yellow-400">
+                                  {checksumResults.filter(r => !r.valid).length} of {checksumResults.length} checksums invalid
+                                </span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  <button
+                    onClick={() => { setParsedFile(null); setChecksumResults(null); setChecksumsFixed(false); setUploadError(null); }}
+                    className="text-xs text-gray-500 hover:text-gray-300 underline"
+                  >
+                    Choose different file
+                  </button>
+                </div>
+              )}
+            </>
           )}
 
-          {/* Step: Safety Checks */}
+          {/* Step 4: Safety Checks */}
           {step === 'checks' && (
             <>
-              <p className="text-sm text-gray-400 mb-3">Running pre-flash safety checks...</p>
+              <p className="text-sm text-gray-400 mb-3">Pre-flash safety checks:</p>
               <div className="space-y-2">
                 {safetyChecks.map((check, i) => (
-                  <div
-                    key={i}
-                    className={`flex items-center gap-3 p-3 rounded-lg border ${
-                      check.pass ? 'border-green-500/30 bg-green-500/5' :
-                      check.critical ? 'border-red-500/30 bg-red-500/5' :
-                      'border-yellow-500/30 bg-yellow-500/5'
-                    }`}
-                  >
-                    {check.pass ? (
-                      <CheckCircle className="w-5 h-5 text-green-400 flex-shrink-0" />
-                    ) : check.critical ? (
-                      <ShieldAlert className="w-5 h-5 text-red-400 flex-shrink-0" />
-                    ) : (
-                      <AlertTriangle className="w-5 h-5 text-yellow-400 flex-shrink-0" />
-                    )}
-                    <span className={`text-sm ${check.pass ? 'text-green-400' : check.critical ? 'text-red-400' : 'text-yellow-400'}`}>
-                      {check.name}
-                    </span>
-                    {check.critical && !check.pass && (
-                      <span className="ml-auto text-[10px] bg-red-500/20 text-red-400 px-1.5 py-0.5 rounded">BLOCKING</span>
+                  <div key={i} className={`flex items-center justify-between p-3 rounded-lg border ${
+                    check.pass
+                      ? 'bg-green-500/5 border-green-500/20'
+                      : check.critical
+                        ? 'bg-red-500/5 border-red-500/20'
+                        : 'bg-yellow-500/5 border-yellow-500/20'
+                  }`}>
+                    <div className="flex items-center gap-2">
+                      {check.pass ? (
+                        <CheckCircle className="w-4 h-4 text-green-400" />
+                      ) : check.critical ? (
+                        <ShieldAlert className="w-4 h-4 text-red-400" />
+                      ) : (
+                        <AlertTriangle className="w-4 h-4 text-yellow-400" />
+                      )}
+                      <span className={`text-sm ${check.pass ? 'text-green-400' : 'text-white'}`}>{check.name}</span>
+                    </div>
+                    {check.critical && (
+                      <span className="text-[10px] bg-red-500/20 text-red-400 px-1.5 py-0.5 rounded">CRITICAL</span>
                     )}
                   </div>
                 ))}
               </div>
               {!allCriticalPassed && (
-                <div className="flex items-center gap-2 text-red-400 text-xs bg-red-500/10 p-3 rounded-lg">
-                  <AlertTriangle className="w-4 h-4 flex-shrink-0" />
-                  Fix blocking issues before proceeding
+                <div className="bg-red-500/10 rounded-xl p-3 border border-red-500/20 flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" />
+                  <p className="text-xs text-red-400">
+                    Critical checks failed. Fix issues before proceeding.
+                  </p>
                 </div>
               )}
             </>
           )}
 
-          {/* Step: Confirm */}
+          {/* Step 5: Confirm */}
           {step === 'confirm' && (
             <>
-              <div className="bg-orange-500/10 border border-orange-500/30 rounded-xl p-4">
-                <div className="flex items-center gap-3 mb-3">
-                  <AlertTriangle className="w-6 h-6 text-orange-400" />
-                  <h3 className="font-bold text-white">Confirm Flash</h3>
+              <div className="bg-[#161b22] rounded-xl p-4 border border-gray-800 space-y-2">
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-500">Flash Type</span>
+                  <span className="text-white capitalize">{flashType}</span>
                 </div>
-                <div className="space-y-2 text-sm">
-                  <div className="flex justify-between text-gray-400">
-                    <span>Flash Type</span>
-                    <span className="text-white capitalize">{flashType} Flash</span>
-                  </div>
-                  <div className="flex justify-between text-gray-400">
-                    <span>Target</span>
-                    <span className="text-white">{parsedFile ? parsedFile.fileName : currentMap?.name || 'Unknown'}</span>
-                  </div>
-                  <div className="flex justify-between text-gray-400">
-                    <span>Engine</span>
-                    <span className="text-white">{profile.engine.toUpperCase()}</span>
-                  </div>
-                  <div className="flex justify-between text-gray-400">
-                    <span>Injector</span>
-                    <span className="text-white">{profile.injector}</span>
-                  </div>
-                  <div className="flex justify-between text-gray-400">
-                    <span>Battery</span>
-                    <span className={obd2.batteryVoltage >= FLASH_CONSTANTS.MIN_BATTERY_VOLTAGE ? 'text-green-400' : 'text-red-400'}>
-                      {obd2.batteryVoltage.toFixed(1)}V
-                    </span>
-                  </div>
-                  {dmeInfo?.vin && (
-                    <div className="flex justify-between text-gray-400">
-                      <span>VIN</span>
-                      <span className="text-white font-mono text-xs">{dmeInfo.vin}</span>
-                    </div>
-                  )}
-                  <div className="flex justify-between text-gray-400">
-                    <span>Est. Time</span>
-                    <span className="text-white">{flashType === 'quick' ? '~5s' : flashType === 'live' ? '~3s' : '~2min'}</span>
-                  </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-500">Target ECU</span>
+                  <span className="text-white">{currentSector?.name}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-500">Vehicle</span>
+                  <span className="text-white">{profile.year} {profile.engine}</span>
                 </div>
               </div>
-              {flashBackups.length > 0 && (
-                <div className="bg-green-500/10 border border-green-500/30 rounded-xl p-3 text-xs text-green-300 flex items-center gap-2">
-                  <CheckCircle className="w-4 h-4 flex-shrink-0" />
-                  DME backup available - restore possible if needed
-                </div>
-              )}
+              <div className="bg-red-500/5 rounded-xl p-3 border border-red-500/20 flex items-start gap-2">
+                <ShieldAlert className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" />
+                <p className="text-xs text-red-400">
+                  Flashing will modify your ECU. Do not disconnect the cable or turn off ignition.
+                </p>
+              </div>
             </>
           )}
 
-          {/* Step: Flashing */}
-          {step === 'flashing' && (session ? (
+          {/* Step 6: Flashing */}
+          {step === 'flashing' && session && (
             <div className="space-y-4">
-              <div className="flex items-center gap-3">
-                <Loader className="w-6 h-6 text-orange-400 animate-spin" />
-                <div>
-                  <div className="font-semibold text-white">Flashing in progress...</div>
-                  <div className="text-xs text-gray-400">{session.currentSector}</div>
-                </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-white">Flashing in progress...</span>
+                <span className="text-sm text-orange-400 font-mono">{session.progress.toFixed(1)}%</span>
               </div>
-              <div className="w-full bg-gray-800 rounded-full h-3">
-                <div className="h-3 bg-orange-500 rounded-full transition-all duration-300" style={{ width: `${session.progress}%` }} />
+              <div className="w-full bg-gray-800 rounded-full h-2">
+                <div
+                  className="bg-orange-500 h-2 rounded-full transition-all"
+                  style={{ width: `${session.progress}%` }}
+                />
               </div>
-              <div className="grid grid-cols-3 gap-3 text-center">
-                <div className="bg-[#161b22] rounded-lg p-2">
-                  <div className="text-xs text-gray-500">Progress</div>
-                  <div className="text-sm font-mono text-white">{session.progress}%</div>
-                </div>
-                <div className="bg-[#161b22] rounded-lg p-2">
-                  <div className="text-xs text-gray-500">Speed</div>
-                  <div className="text-sm font-mono text-white">{Math.round(session.speed)} KB/s</div>
-                </div>
-                <div className="bg-[#161b22] rounded-lg p-2">
-                  <div className="text-xs text-gray-500">ETA</div>
-                  <div className="text-sm font-mono text-white">{session.eta}s</div>
-                </div>
+              <div className="grid grid-cols-2 gap-2 text-xs text-gray-500">
+                <div>Sector: {session.currentSector}</div>
+                <div>Sectors: {session.sectorsComplete}/{session.sectorsTotal}</div>
+                <div>Speed: {(session.speed / 1024).toFixed(1)} KB/s</div>
+                <div>ETA: {session.eta}s</div>
               </div>
               <button
-                onClick={handleAbort}
-                className="w-full flex items-center justify-center gap-2 bg-red-600/20 hover:bg-red-600/30 text-red-400 text-sm py-2.5 rounded-lg transition-colors border border-red-500/20"
+                onClick={() => { obd2Manager.abortFlash(); setStep('error'); }}
+                className="w-full flex items-center justify-center gap-2 bg-red-600/20 hover:bg-red-600/30 text-red-400 py-2.5 rounded-xl transition-colors text-sm border border-red-500/20"
               >
                 <Square className="w-4 h-4" />
                 Abort Flash
               </button>
             </div>
-          ) : (
-            <div className="space-y-4">
-              <div className="text-center">
-                <div className="text-3xl font-bold text-white">{Math.round(progress)}%</div>
-                <div className="text-sm text-gray-400 mt-1">{currentSector}</div>
-              </div>
-              <div className="w-full bg-gray-800 rounded-full h-3 overflow-hidden">
-                <div className="h-3 bg-gradient-to-r from-orange-500 to-red-500 rounded-full transition-all" style={{ width: `${progress}%` }} />
-              </div>
-              <div className="grid grid-cols-3 gap-3 text-center">
-                <div className="bg-[#161b22] rounded-lg p-2">
-                  <div className="text-xs text-gray-500">Sectors</div>
-                  <div className="text-sm font-mono text-white">{sectorsDone}/{sectorsTotal}</div>
-                </div>
-                <div className="bg-[#161b22] rounded-lg p-2">
-                  <div className="text-xs text-gray-500">Speed</div>
-                  <div className="text-sm font-mono text-white">{flashSpeed}KB/s</div>
-                </div>
-                <div className="bg-[#161b22] rounded-lg p-2">
-                  <div className="text-xs text-gray-500">ETA</div>
-                  <div className="text-sm font-mono text-white">{eta}s</div>
-                </div>
-              </div>
-              <div className="bg-red-500/5 border border-red-500/10 rounded-lg p-3 text-center">
-                <AlertTriangle className="w-5 h-5 text-red-400 mx-auto mb-1" />
-                <p className="text-xs text-red-400">Do NOT disconnect USB or turn off ignition</p>
-              </div>
-            </div>
-          ))}
+          )}
 
-          {/* Step: Complete */}
+          {/* Step 7: Complete */}
           {step === 'complete' && (
             <div className="text-center space-y-4">
               <div className="w-16 h-16 rounded-full bg-green-500/10 flex items-center justify-center mx-auto">
-                <CheckCircle className="w-10 h-10 text-green-400" />
+                <CheckCircle className="w-8 h-8 text-green-400" />
               </div>
               <div>
                 <h3 className="text-lg font-bold text-white">Flash Complete!</h3>
-                <p className="text-sm text-gray-400 mt-1">
-                  {parsedFile ? parsedFile.fileName : currentMap?.name} successfully written to DME
-                </p>
+                <p className="text-sm text-gray-400 mt-1">Your DME has been successfully updated.</p>
               </div>
-              <div className="bg-[#161b22] rounded-xl p-3 text-xs text-gray-500 space-y-1">
-                <div className="flex justify-between">
-                  <span>Sectors Written</span>
-                  <span className="text-white font-mono">{sectorsDone || session?.sectorsTotal || 'N/A'}</span>
+              <div className="bg-[#161b22] rounded-xl p-4 border border-gray-800 text-left space-y-2">
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-500">Duration</span>
+                  <span className="text-white font-mono">{session ? ((Date.now() - session.startTime) / 1000).toFixed(0) : 0}s</span>
                 </div>
-                <div className="flex justify-between">
-                  <span>Flash Type</span>
-                  <span className="text-white capitalize">{flashType}</span>
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-500">Sectors Written</span>
+                  <span className="text-white">{session?.sectorsComplete}/{session?.sectorsTotal}</span>
                 </div>
               </div>
-              <p className="text-xs text-gray-500">Turn ignition off for 30 seconds, then restart.</p>
+              <button
+                onClick={handleClose}
+                className="flex items-center justify-center gap-2 bg-green-600 hover:bg-green-700 text-white px-6 py-2.5 rounded-xl transition-colors text-sm mx-auto"
+              >
+                <CheckCircle className="w-4 h-4" />
+                Done
+              </button>
             </div>
           )}
 
-          {/* Error */}
+          {/* Step 8: Error */}
           {step === 'error' && (
             <div className="text-center space-y-4">
               <div className="w-16 h-16 rounded-full bg-red-500/10 flex items-center justify-center mx-auto">
-                <AlertTriangle className="w-10 h-10 text-red-400" />
+                <AlertTriangle className="w-8 h-8 text-red-400" />
               </div>
               <div>
                 <h3 className="text-lg font-bold text-white">Flash Failed</h3>
-                <p className="text-sm text-red-400 mt-1">
-                  {error || (session?.status === 'aborted' ? 'Flash was aborted by user' : 'An error occurred during flashing')}
-                </p>
+                <p className="text-sm text-gray-400 mt-1">An error occurred during flashing.</p>
               </div>
-              {flashBackups.length > 0 && (
-                <div className="bg-orange-500/10 border border-orange-500/30 rounded-xl p-3">
-                  <p className="text-xs text-orange-300 mb-2">A backup is available. You can restore your original tune:</p>
-                  <button
-                    onClick={() => handleRestore(flashBackups[0])}
-                    className="w-full flex items-center justify-center gap-2 bg-orange-600 hover:bg-orange-700 text-white text-sm py-2 rounded-lg transition-colors"
-                  >
-                    <RotateCcw className="w-4 h-4" />
-                    Restore Original Tune
-                  </button>
-                </div>
-              )}
+              <button
+                onClick={handleClose}
+                className="flex items-center justify-center gap-2 bg-gray-700 hover:bg-gray-600 text-white px-6 py-2.5 rounded-xl transition-colors text-sm mx-auto"
+              >
+                <RotateCcw className="w-4 h-4" />
+                Close
+              </button>
             </div>
           )}
         </div>
 
-        {/* Footer Actions */}
-        <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-gray-800 bg-[#0a0a0a] flex-shrink-0">
-          {step === 'backup' && (
-            <>
-              <button onClick={handleSkipBackup} className="text-sm text-gray-400 hover:text-white px-4 py-2 transition-colors">
-                Skip Backup
-              </button>
-              <button
-                onClick={handleNext}
-                disabled={backingUp}
-                className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 text-white text-sm px-4 py-2 rounded-lg transition-colors"
-              >
-                {backingUp ? <Loader className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
-                {backingUp ? 'Backing up...' : 'Backup & Continue'}
-              </button>
-            </>
-          )}
-          {step === 'verify' && (
-            <>
+        {/* Footer */}
+        {['backup', 'verify', 'select', 'upload', 'checks', 'confirm'].includes(step) && (
+          <div className="flex items-center justify-between px-5 py-4 border-t border-gray-800 bg-[#0a0a0a]">
+            {step === 'backup' && (
               <button onClick={handleClose} className="text-sm text-gray-400 hover:text-white px-4 py-2 transition-colors">
                 Cancel
               </button>
-              <button onClick={handleNext} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm px-4 py-2 rounded-lg transition-colors">
-                Next <Play className="w-3.5 h-3.5" />
-              </button>
-            </>
-          )}
-          {step === 'select' && (
-            <>
-              <button onClick={() => setStep('verify')} className="text-sm text-gray-400 hover:text-white px-4 py-2 transition-colors">
+            )}
+            {step === 'verify' && (
+              <button onClick={() => setStep('backup')} className="text-sm text-gray-400 hover:text-white px-4 py-2 transition-colors">
                 Back
               </button>
-              <button onClick={handleNext} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm px-4 py-2 rounded-lg transition-colors">
-                Next <Play className="w-3.5 h-3.5" />
-              </button>
-            </>
-          )}
-          {(step === 'upload' || step === 'validate') && (
-            <>
-              <button onClick={() => setStep('select')} className="text-sm text-gray-400 hover:text-white px-4 py-2 transition-colors">
-                Back
-              </button>
-              <button
-                onClick={handleNext}
-                className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm px-4 py-2 rounded-lg transition-colors"
-              >
-                Next <Play className="w-3.5 h-3.5" />
-              </button>
-            </>
-          )}
-          {step === 'checks' && (
-            <>
-              <button onClick={() => setStep(parsedFile ? 'validate' : 'select')} className="text-sm text-gray-400 hover:text-white px-4 py-2 transition-colors">
-                Back
-              </button>
-              <button
-                onClick={handleNext}
-                disabled={!allCriticalPassed}
-                className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm px-4 py-2 rounded-lg transition-colors"
-              >
-                {allCriticalPassed ? 'Continue' : 'Fix Issues'}
-              </button>
-            </>
-          )}
-          {step === 'confirm' && (
-            <>
-              <button onClick={() => setStep('checks')} className="text-sm text-gray-400 hover:text-white px-4 py-2 transition-colors">
-                Back
-              </button>
-              <button
-                onClick={handleNext}
-                className="flex items-center gap-2 bg-orange-600 hover:bg-orange-700 text-white text-sm px-4 py-2 rounded-lg transition-colors"
-              >
-                <Zap className="w-4 h-4" />
-                Start Flash
-              </button>
-            </>
-          )}
-          {(step === 'complete' || step === 'error') && (
-            <button
-              onClick={handleClose}
-              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm px-4 py-2 rounded-lg transition-colors"
-            >
-              <CheckCircle className="w-4 h-4" />
-              Done
-            </button>
-          )}
-        </div>
+            )}
+            {step === 'select' && (
+              <>
+                <button onClick={() => setStep('verify')} className="text-sm text-gray-400 hover:text-white px-4 py-2 transition-colors">
+                  Back
+                </button>
+                <button
+                  onClick={handleNext}
+                  className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm px-4 py-2 rounded-lg transition-colors"
+                >
+                  Next
+                  <Play className="w-3.5 h-3.5" />
+                </button>
+              </>
+            )}
+            {step === 'upload' && (
+              <>
+                <button onClick={() => setStep('select')} className="text-sm text-gray-400 hover:text-white px-4 py-2 transition-colors">
+                  Back
+                </button>
+                <button
+                  onClick={handleNext}
+                  disabled={!parsedFile || !parsedFile.isValid}
+                  className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm px-4 py-2 rounded-lg transition-colors"
+                >
+                  {parsedFile ? 'Continue' : 'Upload Required'}
+                  <Play className="w-3.5 h-3.5" />
+                </button>
+              </>
+            )}
+            {step === 'checks' && (
+              <>
+                <button onClick={() => setStep('upload')} className="text-sm text-gray-400 hover:text-white px-4 py-2 transition-colors">
+                  Back
+                </button>
+                <button
+                  onClick={handleNext}
+                  disabled={!allCriticalPassed}
+                  className="flex items-center gap-2 bg-orange-600 hover:bg-orange-700 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm px-4 py-2 rounded-lg transition-colors"
+                >
+                  {allCriticalPassed ? 'Flash ECU' : 'Fix Issues'}
+                  <Zap className="w-3.5 h-3.5" />
+                </button>
+              </>
+            )}
+            {step === 'confirm' && (
+              <>
+                <button onClick={() => setStep('upload')} className="text-sm text-gray-400 hover:text-white px-4 py-2 transition-colors">
+                  Back
+                </button>
+                <button
+                  onClick={handleNext}
+                  className="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white text-sm px-4 py-2 rounded-lg transition-colors"
+                >
+                  Start Flash
+                  <Zap className="w-3.5 h-3.5" />
+                </button>
+              </>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

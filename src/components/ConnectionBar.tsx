@@ -13,7 +13,7 @@ export const ConnectionBar: React.FC = () => {
     obd2, setObd2, setObd2Cable, setShowFlashModal,
     watchdogEnabled, setWatchdogEnabled, connectionDead,
     autoReconnectAttempts, maxAutoReconnectAttempts,
-    setShowAdapterSettings, selectedAdapterId, adapterConfigs,
+    setShowAdapterSettings, selectedAdapterId,
   } = useStore();
   const [expanded, setExpanded] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
@@ -74,65 +74,113 @@ export const ConnectionBar: React.FC = () => {
   const ecuOnline = obd2.ecus.filter(e => e.status === 'online').length;
   const ecuTotal = obd2.ecus.length;
 
-  // Show selected adapter name if disconnected
-  const selectedAdapter = selectedAdapterId ? adapterConfigs[selectedAdapterId] : null;
-
   return (
     <div className="bg-[#0d1117] border-b border-gray-800">
-      {/* Top Row: Status (left) + Centered Connect Button + Flash/Expand (right) */}
+      {/* Main Bar */}
       <div className="flex items-center gap-3 px-4 py-2">
-        {/* LEFT: Status Badge + OBD2 Settings button */}
-        <div className="flex items-center gap-2">
-          <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-medium ${getStateColor()}`}>
-            {getStateIcon()}
-            <span>{getStateLabel()}</span>
-            {obd2.connectionState === 'connected' && obd2.cable && (
-              <span className="text-gray-400 ml-1">
-                {obd2.cable.type === 'k_dcan_ftdi' ? 'FTDI' : obd2.cable.type === 'k_dcan_ch340' ? 'CH340' : 'ENET'}
-              </span>
-            )}
-          </div>
-
-          {/* OBD2 Settings Button - always visible */}
-          <button
-            onClick={() => setShowAdapterSettings(true)}
-            title="OBD Adapter Settings"
-            className={`flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border transition-colors ${
-              selectedAdapterId
-                ? 'bg-blue-500/10 text-blue-400 border-blue-500/20 hover:bg-blue-500/20'
-                : 'bg-gray-800 text-gray-500 border-gray-700 hover:bg-gray-700 hover:text-gray-300'
-            }`}
-          >
-            <Settings2 className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">{selectedAdapter ? selectedAdapter.name.split(' ')[0] : 'Adapter'}</span>
-          </button>
+        {/* Left: Connection Status */}
+        <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-medium ${getStateColor()}`}>
+          {getStateIcon()}
+          <span>{getStateLabel()}</span>
+          {obd2.connectionState === 'connected' && obd2.cable && (
+            <span className="text-gray-400 ml-1">
+              {obd2.cable.type === 'k_dcan_ftdi' ? 'FTDI' : obd2.cable.type === 'k_dcan_ch340' ? 'CH340' : 'ENET'}
+            </span>
+          )}
         </div>
 
-        {/* CENTER: Connect/Disconnect Button - always centered */}
-        <div className="flex-1 flex justify-center">
+        {/* Battery */}
+        {obd2.connectionState === 'connected' && (
+          <div className="flex items-center gap-1.5 text-xs">
+            <Battery className="w-3.5 h-3.5 text-green-400" />
+            <span className="text-green-400 font-mono">{obd2.batteryVoltage.toFixed(1)}V</span>
+          </div>
+        )}
+
+        {/* ECU Count */}
+        {obd2.connectionState === 'connected' && (
+          <div className="flex items-center gap-1.5 text-xs">
+            <Cpu className="w-3.5 h-3.5 text-blue-400" />
+            <span className="text-blue-400">{ecuOnline}/{ecuTotal} ECUs</span>
+          </div>
+        )}
+
+        {/* Watchdog */}
+        {obd2.connectionState === 'connected' && (
+          <div className="flex items-center gap-2">
+            {connectionDead ? (
+              <div className="flex items-center gap-1.5 text-xs bg-red-500/10 text-red-400 px-2 py-1 rounded border border-red-500/20 animate-pulse">
+                <HeartPulse className="w-3.5 h-3.5" />
+                <span>DEAD</span>
+                {autoReconnectAttempts > 0 && (
+                  <span className="text-gray-400">({autoReconnectAttempts}/{maxAutoReconnectAttempts})</span>
+                )}
+              </div>
+            ) : (
+              <button
+                onClick={() => setWatchdogEnabled(!watchdogEnabled)}
+                title={watchdogEnabled ? 'Watchdog active (500ms)' : 'Watchdog disabled'}
+                className={`flex items-center gap-1 text-xs px-2 py-1 rounded border transition-colors ${
+                  watchdogEnabled
+                    ? 'bg-green-500/10 text-green-400 border-green-500/20 hover:bg-green-500/20'
+                    : 'bg-gray-800 text-gray-500 border-gray-700 hover:bg-gray-700'
+                }`}
+              >
+                {watchdogEnabled ? <Shield className="w-3 h-3" /> : <ShieldOff className="w-3 h-3" />}
+                <span className="hidden sm:inline">{watchdogEnabled ? 'WD' : 'WD Off'}</span>
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Center: Connect/Disconnect Button */}
+        <div className="mx-auto flex items-center gap-2">
+          {/* OBD2 Settings Button */}
+          <button
+            onClick={() => setShowAdapterSettings(true)}
+            className="flex items-center gap-1.5 bg-gray-700 hover:bg-gray-600 text-gray-300 text-xs px-3 py-1.5 rounded-lg transition-colors"
+            title="OBD2 Adapter Settings"
+          >
+            <Settings2 className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">OBD2</span>
+            {selectedAdapterId && (
+              <span className="w-1.5 h-1.5 rounded-full bg-blue-400" />
+            )}
+          </button>
+
+          {/* Connect/Disconnect */}
           {obd2.connectionState === 'connected' ? (
             <button
               onClick={handleDisconnect}
-              className="flex items-center gap-2 bg-red-600/20 hover:bg-red-600/30 text-red-400 text-sm font-medium px-5 py-2 rounded-lg transition-colors border border-red-500/20"
+              className="flex items-center gap-1.5 bg-red-600/20 hover:bg-red-600/30 text-red-400 text-xs px-4 py-1.5 rounded-lg transition-colors border border-red-500/20"
             >
-              <Unplug className="w-4 h-4" />
+              <Unplug className="w-3.5 h-3.5" />
               Disconnect
             </button>
           ) : (
             <button
               onClick={handleConnect}
               disabled={isConnecting}
-              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-800 text-white text-sm font-medium px-6 py-2 rounded-lg transition-colors shadow-lg shadow-blue-600/20"
+              className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-800 text-white text-xs px-4 py-1.5 rounded-lg transition-colors"
             >
-              {isConnecting ? <Loader className="w-4 h-4 animate-spin" /> : <Plug className="w-4 h-4" />}
+              {isConnecting ? <Loader className="w-3.5 h-3.5 animate-spin" /> : <Plug className="w-3.5 h-3.5" />}
               {isConnecting ? 'Connecting...' : 'Connect'}
             </button>
           )}
-        </div>
 
-        {/* RIGHT: Flash + Expand */}
-        <div className="flex items-center gap-2">
-          {/* Flash Button (only when connected) */}
+          {/* Scan Button (when disconnected) */}
+          {obd2.connectionState === 'disconnected' && !isConnecting && (
+            <button
+              onClick={() => setShowAdapterSettings(true)}
+              className="flex items-center gap-1.5 bg-gray-700 hover:bg-gray-600 text-gray-300 text-xs px-3 py-1.5 rounded-lg transition-colors"
+              title="Scan for adapters"
+            >
+              <Cpu className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Scan</span>
+            </button>
+          )}
+
+          {/* Flash Button */}
           {obd2.connectionState === 'connected' && (
             <button
               onClick={() => setShowFlashModal(true)}
@@ -142,79 +190,18 @@ export const ConnectionBar: React.FC = () => {
               Flash
             </button>
           )}
-
-          {/* Expand (only when connected) */}
-          {obd2.connectionState === 'connected' && (
-            <button
-              onClick={() => setExpanded(!expanded)}
-              className="text-gray-500 hover:text-white transition-colors"
-            >
-              {expanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-            </button>
-          )}
         </div>
+
+        {/* Right: Expand */}
+        {obd2.connectionState === 'connected' && (
+          <button
+            onClick={() => setExpanded(!expanded)}
+            className="text-gray-500 hover:text-white transition-colors ml-2"
+          >
+            {expanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+          </button>
+        )}
       </div>
-
-      {/* Second Row: Selected adapter hint (when disconnected + adapter selected) */}
-      {obd2.connectionState !== 'connected' && selectedAdapter && (
-        <div className="flex items-center justify-center gap-2 px-4 pb-1.5 text-[10px] text-gray-600">
-          <span>Using adapter preset:</span>
-          <span className="text-blue-400 font-medium">{selectedAdapter.name}</span>
-          <span className="text-gray-700">|</span>
-          <span>{selectedAdapter.protocolPreference === 'auto' ? 'Auto protocol' : selectedAdapter.protocolPreference.toUpperCase()}</span>
-          <span className="text-gray-700">|</span>
-          <span>{selectedAdapter.baudRate >= 1000 ? (selectedAdapter.baudRate / 1000) + 'k' : selectedAdapter.baudRate} baud</span>
-        </div>
-      )}
-
-      {/* Second Row: Detailed Stats (when connected) */}
-      {obd2.connectionState === 'connected' && (
-        <div className="flex items-center gap-4 px-4 pb-2 border-t border-gray-800/50 pt-1.5">
-          {/* Battery */}
-          <div className="flex items-center gap-1.5 text-xs">
-            <Battery className="w-3.5 h-3.5 text-green-400" />
-            <span className="text-green-400 font-mono">{obd2.batteryVoltage.toFixed(1)}V</span>
-          </div>
-
-          {/* ECU Count */}
-          <div className="flex items-center gap-1.5 text-xs">
-            <Cpu className="w-3.5 h-3.5 text-blue-400" />
-            <span className="text-blue-400">{ecuOnline}/{ecuTotal} ECUs</span>
-          </div>
-
-          {/* Protocol */}
-          {obd2.dmeProtocolVersion && (
-            <div className="flex items-center gap-1.5 text-xs text-gray-500">
-              <Zap className="w-3.5 h-3.5" />
-              <span>{obd2.dmeProtocolVersion}</span>
-            </div>
-          )}
-
-          {/* Watchdog Toggle / Dead Indicator */}
-          {connectionDead ? (
-            <div className="flex items-center gap-1.5 text-xs bg-red-500/10 text-red-400 px-2 py-1 rounded border border-red-500/20 animate-pulse">
-              <HeartPulse className="w-3.5 h-3.5" />
-              <span>DEAD</span>
-              {autoReconnectAttempts > 0 && (
-                <span className="text-gray-400">({autoReconnectAttempts}/{maxAutoReconnectAttempts})</span>
-              )}
-            </div>
-          ) : (
-            <button
-              onClick={() => setWatchdogEnabled(!watchdogEnabled)}
-              title={watchdogEnabled ? 'Watchdog active (500ms)' : 'Watchdog disabled'}
-              className={`flex items-center gap-1 text-xs px-2 py-1 rounded border transition-colors ${
-                watchdogEnabled
-                  ? 'bg-green-500/10 text-green-400 border-green-500/20 hover:bg-green-500/20'
-                  : 'bg-gray-800 text-gray-500 border-gray-700 hover:bg-gray-700'
-              }`}
-            >
-              {watchdogEnabled ? <Shield className="w-3 h-3" /> : <ShieldOff className="w-3 h-3" />}
-              <span className="hidden sm:inline">{watchdogEnabled ? 'WD' : 'WD Off'}</span>
-            </button>
-          )}
-        </div>
-      )}
 
       {/* Expanded ECU List */}
       {expanded && obd2.connectionState === 'connected' && (
