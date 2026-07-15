@@ -1,173 +1,92 @@
-// BMW E60 Coder Pro - DME Flash Engine
-// Handles BMW MSD80/MSD81 flash memory layout, checksum validation, and flash file processing.
-// All operations are real - uses UDS SID 0x34/0x36/0x37 for flash programming.
+// BMW E60 Coder Pro - DME Flash Engine with Checksum Validation
+// Supports MSD80/MSD81 DME memory layout with full checksum verification
 
-import type { FlashBackup, BackupSector } from '@/types';
+import type { BackupSector } from '@/types';
 
-// ============================================================================
-// BMW DME MEMORY LAYOUT (MSD80/MSD81 - N54)
-// ============================================================================
-
-export interface DMESector {
+// BMW DME Memory Layout Definitions
+export interface FlashSectorDef {
   name: string;
   startAddress: number;
   size: number;
   isBootSector: boolean;
-  isCalibration: boolean;
-  isProgram: boolean;
-  checksumOffset?: number;
-  checksumType: 'bmw_crc16' | 'crc16_ccitt' | 'crc32' | 'sum32' | 'none';
-  description: string;
   writable: boolean;
+  checksumOffset?: number;
 }
-
-export const DME_SECTORS_MSD80: DMESector[] = [
-  { name: 'Bootloader', startAddress: 0x00000000, size: 0x10000, isBootSector: true, isCalibration: false, isProgram: false, checksumType: 'none', description: 'DME boot code - NEVER WRITE', writable: false },
-  { name: 'Program_0', startAddress: 0x00010000, size: 0x20000, isBootSector: false, isCalibration: false, isProgram: true, checksumType: 'bmw_crc16', description: 'Program code block 0', writable: true },
-  { name: 'Program_1', startAddress: 0x00030000, size: 0x20000, isBootSector: false, isCalibration: false, isProgram: true, checksumType: 'bmw_crc16', description: 'Program code block 1', writable: true },
-  { name: 'Program_2', startAddress: 0x00050000, size: 0x20000, isBootSector: false, isCalibration: false, isProgram: true, checksumType: 'bmw_crc16', description: 'Program code block 2', writable: true },
-  { name: 'Program_3', startAddress: 0x00070000, size: 0x20000, isBootSector: false, isCalibration: false, isProgram: true, checksumType: 'bmw_crc16', description: 'Program code block 3', writable: true },
-  { name: 'Calibration_0', startAddress: 0x00090000, size: 0x20000, isBootSector: false, isCalibration: true, isProgram: false, checksumType: 'bmw_crc16', checksumOffset: 0x1FFF0, description: 'Fuel + ignition maps', writable: true },
-  { name: 'Calibration_1', startAddress: 0x000B0000, size: 0x20000, isBootSector: false, isCalibration: true, isProgram: false, checksumType: 'bmw_crc16', checksumOffset: 0x1FFF0, description: 'Boost + torque maps', writable: true },
-  { name: 'Calibration_2', startAddress: 0x000D0000, size: 0x20000, isBootSector: false, isCalibration: true, isProgram: false, checksumType: 'bmw_crc16', checksumOffset: 0x1FFF0, description: 'VANOS + throttle maps', writable: true },
-  { name: 'Calibration_3', startAddress: 0x000F0000, size: 0x20000, isBootSector: false, isCalibration: true, isProgram: false, checksumType: 'bmw_crc16', checksumOffset: 0x1FFF0, description: 'Limiters + misc', writable: true },
-  { name: 'Full_Calibration', startAddress: 0x00090000, size: 0x80000, isBootSector: false, isCalibration: true, isProgram: false, checksumType: 'bmw_crc16', checksumOffset: 0x7FFF0, description: 'Complete calibration region (512KB)', writable: true },
-];
-
-export const DME_SECTORS_MSD81: DMESector[] = [
-  { name: 'Bootloader', startAddress: 0x00000000, size: 0x10000, isBootSector: true, isCalibration: false, isProgram: false, checksumType: 'none', description: 'DME boot code - NEVER WRITE', writable: false },
-  { name: 'Program_0', startAddress: 0x00010000, size: 0x20000, isBootSector: false, isCalibration: false, isProgram: true, checksumType: 'bmw_crc16', description: 'Program code block 0', writable: true },
-  { name: 'Program_1', startAddress: 0x00030000, size: 0x20000, isBootSector: false, isCalibration: false, isProgram: true, checksumType: 'bmw_crc16', description: 'Program code block 1', writable: true },
-  { name: 'Program_2', startAddress: 0x00050000, size: 0x20000, isBootSector: false, isCalibration: false, isProgram: true, checksumType: 'bmw_crc16', description: 'Program code block 2', writable: true },
-  { name: 'Program_3', startAddress: 0x00070000, size: 0x20000, isBootSector: false, isCalibration: false, isProgram: true, checksumType: 'bmw_crc16', description: 'Program code block 3', writable: true },
-  { name: 'Calibration_0', startAddress: 0x00090000, size: 0x20000, isBootSector: false, isCalibration: true, isProgram: false, checksumType: 'bmw_crc16', checksumOffset: 0x1FFF0, description: 'Fuel + ignition maps', writable: true },
-  { name: 'Calibration_1', startAddress: 0x000B0000, size: 0x20000, isBootSector: false, isCalibration: true, isProgram: false, checksumType: 'bmw_crc16', checksumOffset: 0x1FFF0, description: 'Boost + torque maps', writable: true },
-  { name: 'Calibration_2', startAddress: 0x000D0000, size: 0x20000, isBootSector: false, isCalibration: true, isProgram: false, checksumType: 'bmw_crc16', checksumOffset: 0x1FFF0, description: 'VANOS + throttle maps', writable: true },
-  { name: 'Calibration_3', startAddress: 0x000F0000, size: 0x20000, isBootSector: false, isCalibration: true, isProgram: false, checksumType: 'bmw_crc16', checksumOffset: 0x1FFF0, description: 'Limiters + misc', writable: true },
-  { name: 'Full_Calibration', startAddress: 0x00090000, size: 0x80000, isBootSector: false, isCalibration: true, isProgram: false, checksumType: 'bmw_crc16', checksumOffset: 0x7FFF0, description: 'Complete calibration region (512KB)', writable: true },
-];
-
-// ============================================================================
-// FLASH FILE (.bin) PARSER
-// ============================================================================
 
 export interface ParsedFlashFile {
-  fileName: string;
-  fileSize: number;
   data: Uint8Array;
   ecuType: string;
+  dmeFamily: string;
   softwareVersion: string;
+  softwareDate: string;
   vin: string;
-  sectors: FlashSectorInfo[];
-  checksumsValid: boolean;
-  warnings: string[];
-}
-
-export interface FlashSectorInfo {
-  name: string;
-  startAddress: number;
+  isValid: boolean;
   size: number;
-  checksumType: string;
-  checksumValid: boolean;
-  checksumStored: number;
-  checksumComputed: number;
+  sectors: BackupSector[];
+  checksumsValid: boolean;
+  errors: string[];
 }
 
-export function parseFlashFile(file: File): Promise<ParsedFlashFile> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        const data = new Uint8Array(reader.result as ArrayBuffer);
-        resolve(analyzeFlashData(file.name, data));
-      } catch (e) { reject(e); }
-    };
-    reader.onerror = () => reject(new Error('Failed to read file'));
-    reader.readAsArrayBuffer(file);
-  });
+export interface ChecksumResult {
+  sector: string;
+  address: string;
+  expected: string;
+  computed: string;
+  valid: boolean;
+  algorithm: string;
 }
 
-function analyzeFlashData(fileName: string, data: Uint8Array): ParsedFlashFile {
-  const warnings: string[] = [];
-  const size = data.length;
-  if (size !== 0x200000 && size !== 0x80000 && size !== 0x100000) {
-    warnings.push(`Unusual file size: ${(size / 1024).toFixed(0)}KB (expected 512KB, 1MB, or 2MB)`);
-  }
+// MSD80/MSD81 DME Memory Layout (2MB flash)
+export const MSD80_SECTORS: FlashSectorDef[] = [
+  { name: 'Bootloader', startAddress: 0x000000, size: 0x10000, isBootSector: true, writable: false, checksumOffset: 0x0FFFC },
+  { name: 'Program 0', startAddress: 0x010000, size: 0x20000, isBootSector: false, writable: true, checksumOffset: 0x02FFFC },
+  { name: 'Program 1', startAddress: 0x030000, size: 0x20000, isBootSector: false, writable: true, checksumOffset: 0x04FFFC },
+  { name: 'Program 2', startAddress: 0x050000, size: 0x20000, isBootSector: false, writable: true, checksumOffset: 0x06FFFC },
+  { name: 'Program 3', startAddress: 0x070000, size: 0x20000, isBootSector: false, writable: true, checksumOffset: 0x08FFFC },
+  { name: 'Calibration 0', startAddress: 0x090000, size: 0x40000, isBootSector: false, writable: true, checksumOffset: 0x0CFFFC },
+  { name: 'Calibration 1', startAddress: 0x0D0000, size: 0x40000, isBootSector: false, writable: true, checksumOffset: 0x10FFFC },
+  { name: 'Calibration 2', startAddress: 0x110000, size: 0x40000, isBootSector: false, writable: true, checksumOffset: 0x14FFFC },
+  { name: 'Calibration 3', startAddress: 0x150000, size: 0x40000, isBootSector: false, writable: true, checksumOffset: 0x18FFFC },
+  { name: 'Full Calibration', startAddress: 0x190000, size: 0x60000, isBootSector: false, writable: true, checksumOffset: 0x1EFFFC },
+];
 
-  let ecuType = detectECUType(data);
-  if (!ecuType) {
-    ecuType = size >= 0x200000 ? 'MSD80/MSD81' : 'Unknown (calibration only)';
-    warnings.push('Could not auto-detect ECU type - verify file compatibility');
-  }
+export const MSD81_SECTORS: FlashSectorDef[] = [
+  { name: 'Bootloader', startAddress: 0x000000, size: 0x10000, isBootSector: true, writable: false, checksumOffset: 0x0FFFC },
+  { name: 'Program 0', startAddress: 0x010000, size: 0x20000, isBootSector: false, writable: true, checksumOffset: 0x02FFFC },
+  { name: 'Program 1', startAddress: 0x030000, size: 0x20000, isBootSector: false, writable: true, checksumOffset: 0x04FFFC },
+  { name: 'Program 2', startAddress: 0x050000, size: 0x20000, isBootSector: false, writable: true, checksumOffset: 0x06FFFC },
+  { name: 'Program 3', startAddress: 0x070000, size: 0x20000, isBootSector: false, writable: true, checksumOffset: 0x08FFFC },
+  { name: 'Calibration 0', startAddress: 0x090000, size: 0x40000, isBootSector: false, writable: true, checksumOffset: 0x0CFFFC },
+  { name: 'Calibration 1', startAddress: 0x0D0000, size: 0x40000, isBootSector: false, writable: true, checksumOffset: 0x10FFFC },
+  { name: 'Calibration 2', startAddress: 0x110000, size: 0x40000, isBootSector: false, writable: true, checksumOffset: 0x14FFFC },
+  { name: 'Calibration 3', startAddress: 0x150000, size: 0x40000, isBootSector: false, writable: true, checksumOffset: 0x18FFFC },
+  { name: 'Full Calibration', startAddress: 0x190000, size: 0x60000, isBootSector: false, writable: true, checksumOffset: 0x1EFFFC },
+];
 
-  const vin = extractVIN(data, size);
-  const softwareVersion = extractSoftwareVersion(data, size);
-  const sectorLayout = ecuType.includes('MSD81') ? DME_SECTORS_MSD81 : DME_SECTORS_MSD80;
+// Checksum Algorithms
 
-  let allChecksumsValid = true;
-  const sectors: FlashSectorInfo[] = [];
-
-  for (const sector of sectorLayout) {
-    if (sector.startAddress >= size) continue;
-    if (sector.checksumType === 'none') continue;
-    const sectorData = data.slice(sector.startAddress, Math.min(sector.startAddress + sector.size, size));
-    if (sectorData.length < 4) continue;
-
-    const computed = computeChecksum(sectorData, sector.checksumType);
-    let stored = 0;
-    if (sector.checksumOffset && sector.startAddress + sector.checksumOffset < size) {
-      stored = readUint32(data, sector.startAddress + sector.checksumOffset);
-    } else {
-      stored = readUint32(data, sector.startAddress + sectorData.length - 4);
-    }
-
-    const valid = computed === stored;
-    if (!valid) allChecksumsValid = false;
-
-    sectors.push({
-      name: sector.name,
-      startAddress: sector.startAddress,
-      size: sector.size,
-      checksumType: sector.checksumType,
-      checksumValid: valid,
-      checksumStored: stored,
-      checksumComputed: computed,
-    });
-  }
-
-  if (!allChecksumsValid) {
-    warnings.push('Some sector checksums do not match - file may be modified or corrupted');
-  }
-
-  if (size >= 0x10000) {
-    const bootData = data.slice(0, 0x10000);
-    if (checkBootSignature(bootData)) {
-      warnings.push('File contains bootloader - ensure you NEVER flash the boot sector');
-    }
-  }
-
-  return { fileName, fileSize: size, data, ecuType, softwareVersion, vin, sectors, checksumsValid: allChecksumsValid, warnings };
-}
-
-// ============================================================================
-// CHECKSUM ALGORITHMS
-// ============================================================================
-
-export function bmwCRC16(data: Uint8Array): number {
+/**
+ * BMW CRC-16 (poly 0x8005, init 0xFFFF)
+ */
+export function bmwCRC16(data: Uint8Array, offset: number, length: number): number {
   let crc = 0xFFFF;
-  for (let i = 0; i < data.length; i++) {
-    crc ^= data[i];
+  for (let i = 0; i < length; i++) {
+    crc ^= data[offset + i] << 8;
     for (let j = 0; j < 8; j++) {
-      crc = (crc & 1) ? ((crc >> 1) ^ 0xA001) : (crc >> 1);
+      crc = (crc & 0x8000) ? ((crc << 1) ^ 0x8005) : (crc << 1);
     }
+    crc &= 0xFFFF;
   }
-  return crc & 0xFFFF;
+  return crc;
 }
 
-export function crc16CCITT(data: Uint8Array): number {
+/**
+ * CRC-16 CCITT (poly 0x1021, init 0xFFFF)
+ */
+export function crc16CCITT(data: Uint8Array, offset: number, length: number): number {
   let crc = 0xFFFF;
-  for (let i = 0; i < data.length; i++) {
-    crc ^= data[i] << 8;
+  for (let i = 0; i < length; i++) {
+    crc ^= data[offset + i] << 8;
     for (let j = 0; j < 8; j++) {
       crc = (crc & 0x8000) ? ((crc << 1) ^ 0x1021) : (crc << 1);
     }
@@ -176,217 +95,316 @@ export function crc16CCITT(data: Uint8Array): number {
   return crc;
 }
 
-export function crc32(data: Uint8Array): number {
-  const table = new Uint32Array(256);
-  for (let i = 0; i < 256; i++) {
-    let c = i;
-    for (let j = 0; j < 8; j++) {
-      c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
-    }
-    table[i] = c;
-  }
+/**
+ * CRC-32 (IEEE 802.3)
+ */
+export function crc32(data: Uint8Array, offset: number, length: number): number {
   let crc = 0xFFFFFFFF;
-  for (let i = 0; i < data.length; i++) {
-    crc = table[(crc ^ data[i]) & 0xFF] ^ (crc >>> 8);
+  for (let i = 0; i < length; i++) {
+    crc ^= data[offset + i];
+    for (let j = 0; j < 8; j++) {
+      crc = (crc & 1) ? ((crc >>> 1) ^ 0xEDB88320) : (crc >>> 1);
+    }
   }
-  return (crc ^ 0xFFFFFFFF) >>> 0;
+  return (~crc) >>> 0;
 }
 
-export function sum32(data: Uint8Array): number {
+/**
+ * Simple 32-bit sum checksum (BMW variant)
+ */
+export function sum32(data: Uint8Array, offset: number, length: number): number {
   let sum = 0;
-  for (let i = 0; i < data.length; i += 4) {
-    sum += readUint32(data, i);
-  }
-  return (sum & 0xFFFFFFFF) >>> 0;
-}
-
-export function computeChecksum(data: Uint8Array, type: string): number {
-  switch (type) {
-    case 'bmw_crc16': return bmwCRC16(data);
-    case 'crc16_ccitt': return crc16CCITT(data);
-    case 'crc32': return crc32(data);
-    case 'sum32': return sum32(data);
-    default: return 0;
-  }
-}
-
-// ============================================================================
-// FLASH UTILITIES
-// ============================================================================
-
-export function extractCalibration(data: Uint8Array): Uint8Array {
-  if (data.length === 0x80000) return data;
-  if (data.length >= 0x110000) return data.slice(0x90000, 0x110000);
-  return data;
-}
-
-export function fixChecksums(data: Uint8Array, ecuType: string): Uint8Array {
-  const result = new Uint8Array(data);
-  const sectors = ecuType.includes('MSD81') ? DME_SECTORS_MSD81 : DME_SECTORS_MSD80;
-  for (const sector of sectors) {
-    if (!sector.writable || sector.checksumType === 'none') continue;
-    if (sector.startAddress >= result.length) continue;
-    const endAddr = Math.min(sector.startAddress + sector.size, result.length);
-    const sectorData = result.slice(sector.startAddress, endAddr);
-    const checksum = computeChecksum(sectorData, sector.checksumType);
-    const checksumAddr = sector.checksumOffset ? sector.startAddress + sector.checksumOffset : endAddr - 4;
-    if (checksumAddr + 4 <= result.length) {
-      writeUint32(result, checksumAddr, checksum);
+  for (let i = 0; i < length; i += 4) {
+    let val = 0;
+    for (let b = 0; b < 4 && (i + b) < length; b++) {
+      val |= data[offset + i + b] << (b * 8);
     }
+    sum = (sum + val) >>> 0;
   }
-  return result;
+  return sum;
 }
 
-export function diffFlashFiles(original: Uint8Array, modified: Uint8Array): { address: number; original: number; modified: number }[] {
-  const diffs: { address: number; original: number; modified: number }[] = [];
-  const minLen = Math.min(original.length, modified.length);
-  for (let i = 0; i < minLen; i++) {
-    if (original[i] !== modified[i]) diffs.push({ address: i, original: original[i], modified: modified[i] });
+/**
+ * Compute checksum for a sector using the specified algorithm
+ */
+export function computeSectorChecksum(
+  data: Uint8Array,
+  sector: FlashSectorDef,
+  algorithm: 'bmw_crc16' | 'crc16_ccitt' | 'crc32' | 'sum32' = 'bmw_crc16'
+): number {
+  const payloadEnd = sector.checksumOffset !== undefined
+    ? sector.checksumOffset - sector.startAddress
+    : sector.size - 4;
+
+  switch (algorithm) {
+    case 'bmw_crc16':
+      return bmwCRC16(data, sector.startAddress, payloadEnd);
+    case 'crc16_ccitt':
+      return crc16CCITT(data, sector.startAddress, payloadEnd);
+    case 'crc32':
+      return crc32(data, sector.startAddress, payloadEnd);
+    case 'sum32':
+      return sum32(data, sector.startAddress, payloadEnd);
+    default:
+      return bmwCRC16(data, sector.startAddress, payloadEnd);
   }
-  return diffs;
 }
 
-// ============================================================================
-// FLASH OPERATIONS
-// ============================================================================
-
-export interface FlashOperation {
-  sector: DMESector;
-  data: Uint8Array;
-  verifyAfterWrite: boolean;
+/**
+ * Read the stored checksum from flash data at the sector's checksum offset
+ */
+export function readStoredChecksum(data: Uint8Array, sector: FlashSectorDef): number {
+  if (sector.checksumOffset === undefined) return 0;
+  const off = sector.checksumOffset;
+  return (data[off] | (data[off + 1] << 8) | (data[off + 2] << 16) | (data[off + 3] << 24)) >>> 0;
 }
 
-export function buildFlashOperations(flashFile: ParsedFlashFile, flashType: 'full' | 'quick' | 'live', ecuType: string): FlashOperation[] {
-  const sectors = ecuType.includes('MSD81') ? DME_SECTORS_MSD81 : DME_SECTORS_MSD80;
-  const operations: FlashOperation[] = [];
+/**
+ * Write checksum into flash data at sector's checksum offset
+ */
+export function writeChecksum(data: Uint8Array, sector: FlashSectorDef, checksum: number): void {
+  if (sector.checksumOffset === undefined) return;
+  const off = sector.checksumOffset;
+  data[off] = checksum & 0xFF;
+  data[off + 1] = (checksum >> 8) & 0xFF;
+  data[off + 2] = (checksum >> 16) & 0xFF;
+  data[off + 3] = (checksum >> 24) & 0xFF;
+}
 
-  if (flashType === 'quick' || flashType === 'live') {
-    const calSectors = sectors.filter(s => s.isCalibration && s.name !== 'Full_Calibration');
-    for (const sector of calSectors) {
-      if (sector.startAddress < flashFile.data.length) {
-        operations.push({ sector, data: flashFile.data.slice(sector.startAddress, Math.min(sector.startAddress + sector.size, flashFile.data.length)), verifyAfterWrite: true });
-      }
+/**
+ * Validate all sector checksums in a flash file
+ */
+export function validateChecksums(
+  data: Uint8Array,
+  sectors: FlashSectorDef[],
+  algorithm: 'bmw_crc16' | 'crc16_ccitt' | 'crc32' | 'sum32' = 'bmw_crc16'
+): ChecksumResult[] {
+  return sectors.map(sector => {
+    const stored = readStoredChecksum(data, sector);
+    const computed = computeSectorChecksum(data, sector, algorithm);
+    return {
+      sector: sector.name,
+      address: `0x${sector.startAddress.toString(16).toUpperCase().padStart(6, '0')}`,
+      expected: `0x${stored.toString(16).toUpperCase().padStart(8, '0')}`,
+      computed: `0x${computed.toString(16).toUpperCase().padStart(8, '0')}`,
+      valid: stored === computed,
+      algorithm,
+    };
+  });
+}
+
+/**
+ * Fix all checksums in a flash file (recompute and write)
+ */
+export function fixChecksums(
+  data: Uint8Array,
+  sectors: FlashSectorDef[],
+  algorithm: 'bmw_crc16' | 'crc16_ccitt' | 'crc32' | 'sum32' = 'bmw_crc16'
+): ChecksumResult[] {
+  return sectors.map(sector => {
+    if (sector.isBootSector || !sector.writable) {
+      return {
+        sector: sector.name,
+        address: `0x${sector.startAddress.toString(16).toUpperCase().padStart(6, '0')}`,
+        expected: '0x00000000',
+        computed: '0x00000000',
+        valid: true,
+        algorithm: 'skipped',
+      };
     }
+    const computed = computeSectorChecksum(data, sector, algorithm);
+    writeChecksum(data, sector, computed);
+    return {
+      sector: sector.name,
+      address: `0x${sector.startAddress.toString(16).toUpperCase().padStart(6, '0')}`,
+      expected: `0x${computed.toString(16).toUpperCase().padStart(8, '0')}`,
+      computed: `0x${computed.toString(16).toUpperCase().padStart(8, '0')}`,
+      valid: true,
+      algorithm,
+    };
+  });
+}
+
+/**
+ * Parse a flash file (.bin, .ori, .mod, .fls)
+ */
+export function parseFlashFile(arrayBuffer: ArrayBuffer): ParsedFlashFile {
+  const data = new Uint8Array(arrayBuffer);
+  const size = data.length;
+  const errors: string[] = [];
+
+  // Detect ECU type from file size and signatures
+  let ecuType = 'Unknown';
+  let dmeFamily = 'Unknown';
+  let sectors = MSD80_SECTORS;
+
+  if (size === 0x200000) {
+    ecuType = 'MSD80/MSD81';
+    dmeFamily = 'MEVD17.2';
+    sectors = MSD81_SECTORS;
+  } else if (size === 0x400000) {
+    ecuType = 'MSD85/MSD87';
+    dmeFamily = 'MEVD17.2.6';
+    sectors = MSD81_SECTORS.map(s => ({ ...s, size: s.size * 2 }));
+  } else if (size > 0) {
+    errors.push(`Unusual file size: ${size} bytes (expected 2MB or 4MB for BMW DME)`);
+    ecuType = 'Unknown';
+    dmeFamily = 'Unknown';
   } else {
-    for (const sector of sectors) {
-      if (sector.writable && sector.startAddress < flashFile.data.length) {
-        operations.push({ sector, data: flashFile.data.slice(sector.startAddress, Math.min(sector.startAddress + sector.size, flashFile.data.length)), verifyAfterWrite: true });
-      }
-    }
+    errors.push('Empty file');
   }
-  return operations;
-}
 
-export function buildFlashBackup(sectorData: { name: string; data: Uint8Array; checksum: string }[], vin: string, ecuType: string, softwareVersion: string): FlashBackup {
-  const totalBytes = sectorData.reduce((sum, s) => sum + s.data.length, 0);
-  const sectors: BackupSector[] = sectorData.map(s => ({
+  // Extract VIN from flash (BMW VIN stored at offset 0x400 for MSD80/81)
+  let vin = '';
+  try {
+    const vinBytes: number[] = [];
+    for (let i = 0x400; i < 0x411 && i < size; i++) {
+      const c = data[i];
+      if (c >= 0x20 && c < 0x7F) vinBytes.push(c);
+    }
+    vin = String.fromCharCode(...vinBytes).trim();
+  } catch {
+    vin = '';
+  }
+
+  // Extract software version (typically at offset 0x420)
+  let softwareVersion = '';
+  let softwareDate = '';
+  try {
+    const swBytes: number[] = [];
+    for (let i = 0x420; i < 0x440 && i < size; i++) {
+      const c = data[i];
+      if (c >= 0x20 && c < 0x7F) swBytes.push(c);
+    }
+    softwareVersion = String.fromCharCode(...swBytes).trim();
+  } catch {
+    softwareVersion = '';
+  }
+
+  // Validate checksums
+  let checksumsValid = true;
+  const checksumResults = validateChecksums(data, sectors);
+  const failedChecksums = checksumResults.filter(r => !r.valid);
+  if (failedChecksums.length > 0) {
+    checksumsValid = false;
+    errors.push(`${failedChecksums.length} sector checksum(s) invalid`);
+  }
+
+  // Build sector list
+  const sectorList: BackupSector[] = sectors.map(s => ({
     name: s.name,
-    startAddress: '0x' + s.data.length.toString(16),
-    size: s.data.length,
-    checksum: s.checksum,
-    backedUp: true,
+    startAddress: `0x${s.startAddress.toString(16).toUpperCase().padStart(6, '0')}`,
+    size: s.size,
+    checksum: checksumResults.find(r => r.sector === s.name)?.computed || '0x00000000',
+    backedUp: false,
   }));
 
   return {
-    id: `backup_${Date.now()}`,
-    createdAt: Date.now(),
-    vin,
+    data,
     ecuType,
+    dmeFamily,
     softwareVersion,
-    engineType: 'n54',
-    mapType: 'stock',
-    batteryVoltage: 13.0,
-    sectors,
-    totalBytes,
-    status: 'complete',
-    progress: 100,
+    softwareDate,
+    vin,
+    isValid: size >= 0x10000 && errors.length === 0,
+    size,
+    sectors: sectorList,
+    checksumsValid,
+    errors,
   };
 }
 
-// ============================================================================
-// PRIVATE HELPERS
-// ============================================================================
-
-function readUint32(data: Uint8Array, offset: number): number {
-  return (data[offset] | (data[offset + 1] << 8) | (data[offset + 2] << 16) | (data[offset + 3] << 24)) >>> 0;
+/**
+ * Build flash operations plan from parsed file
+ */
+export interface FlashOperation {
+  sector: string;
+  startAddress: number;
+  size: number;
+  checksum: string;
+  isCalibration: boolean;
 }
 
-function writeUint32(data: Uint8Array, offset: number, value: number): void {
-  data[offset] = value & 0xFF;
-  data[offset + 1] = (value >> 8) & 0xFF;
-  data[offset + 2] = (value >> 16) & 0xFF;
-  data[offset + 3] = (value >> 24) & 0xFF;
+export function buildFlashOperations(parsed: ParsedFlashFile): FlashOperation[] {
+  return parsed.sectors
+    .filter(s => s.name.toLowerCase().includes('calibration') || s.name.toLowerCase().includes('program'))
+    .map(s => ({
+      sector: s.name,
+      startAddress: parseInt(s.startAddress, 16),
+      size: s.size,
+      checksum: s.checksum,
+      isCalibration: s.name.toLowerCase().includes('calibration'),
+    }));
 }
 
-function detectECUType(data: Uint8Array): string {
-  const textDecoder = new TextDecoder('latin1');
-  const patterns = [
-    { pattern: 'MSD80', name: 'MSD80' },
-    { pattern: 'MSD81', name: 'MSD81' },
-    { pattern: 'MEVD17', name: 'MEVD17' },
-    { pattern: 'MSD85', name: 'MSD85' },
-    { pattern: 'MSD87', name: 'MSD87' },
-    { pattern: 'IJE0', name: 'IJE0' },
-    { pattern: 'IJ0', name: 'IJ0' },
-  ];
+/**
+ * Get ECU type from file size
+ */
+export function detectEcuType(size: number): string {
+  if (size === 0x200000) return 'MSD80/MSD81 (2MB)';
+  if (size === 0x400000) return 'MSD85/MSD87 (4MB)';
+  if (size === 0x80000) return 'MS42/MS43 (512KB)';
+  if (size === 0x100000) return 'MSD70/MSD80 Early (1MB)';
+  return `Unknown (${(size / 1024 / 1024).toFixed(2)}MB)`;
+}
 
-  const calArea = data.slice(0x90000, 0xB0000);
-  const calText = textDecoder.decode(calArea);
-  for (const { pattern, name } of patterns) {
-    if (calText.includes(pattern)) return name;
+/**
+ * Verify if a file looks like a valid BMW DME flash file
+ */
+export function isValidFlashFile(data: Uint8Array): boolean {
+  // Check size
+  if (data.length < 0x10000) return false;
+
+  // Check for BMW signature bytes at various known offsets
+  const bmwSig1 = data[0] === 0x00 && data[1] === 0x00 && data[2] === 0x00 && data[3] === 0x20;
+  const bmwSig2 = data[0x400] >= 0x20 && data[0x400] < 0x7F; // VIN area should be ASCII
+
+  return bmwSig1 || bmwSig2;
+}
+
+/**
+ * Read tune name/description from file if embedded
+ */
+export function extractTuneInfo(data: Uint8Array): { name: string; author: string; date: string } {
+  let name = '';
+  let author = '';
+  let date = '';
+
+  // Try to find tune info in common metadata locations
+  const metadataOffsets = [0x1F0000, 0x1E0000, 0x1D0000];
+  for (const off of metadataOffsets) {
+    if (off + 128 > data.length) continue;
+    const bytes: number[] = [];
+    for (let i = off; i < off + 128 && i < data.length; i++) {
+      const c = data[i];
+      if (c === 0) break;
+      if (c >= 0x20 && c < 0x7F) bytes.push(c);
+    }
+    const text = String.fromCharCode(...bytes).trim();
+    if (text.length > 5) {
+      const parts = text.split('|');
+      name = parts[0]?.trim() || '';
+      author = parts[1]?.trim() || '';
+      date = parts[2]?.trim() || '';
+      if (name) break;
+    }
   }
 
-  const progArea = data.slice(0x10000, 0x30000);
-  const progText = textDecoder.decode(progArea);
-  for (const { pattern, name } of patterns) {
-    if (progText.includes(pattern)) return name;
-  }
-  return '';
+  return { name, author, date };
 }
 
-function extractVIN(data: Uint8Array, fileSize: number): string {
-  const decoder = new TextDecoder('latin1');
-  const vinOffsets = [0x94000, 0x94020, 0x400, 0x420];
-  for (const offset of vinOffsets) {
-    if (offset + 17 > fileSize) continue;
-    const vin = decoder.decode(data.slice(offset, offset + 17));
-    if (/^[A-HJ-NPR-Z0-9]{17}$/i.test(vin)) return vin.toUpperCase();
-  }
-  return '';
-}
-
-function extractSoftwareVersion(data: Uint8Array, fileSize: number): string {
-  const decoder = new TextDecoder('latin1');
-  const searchOffsets = [0x90000, 0x92000, 0x94000, 0x95000];
-  for (const offset of searchOffsets) {
-    if (offset + 64 > fileSize) continue;
-    const text = decoder.decode(data.slice(offset, offset + 64));
-    const match = text.match(/(\d{3}[A-Z0-9]{5,})/);
-    if (match) return match[1];
-  }
-  return '';
-}
-
-function checkBootSignature(data: Uint8Array): boolean {
-  if (data.length < 8) return false;
-  const stackPointer = readUint32(data, 0);
-  const resetVector = readUint32(data, 4);
-  return stackPointer >= 0x40000000 && stackPointer < 0x50000000 && resetVector >= 0x00000000;
-}
-
-// ============================================================================
-// CONSTANTS
-// ============================================================================
-
-export const FLASH_CONSTANTS = {
-  DME_FLASH_SIZE: 0x200000,
-  CALIBRATION_SIZE: 0x80000,
-  CALIBRATION_START: 0x90000,
-  BOOTLOADER_SIZE: 0x10000,
-  SECTOR_SIZE: 0x20000,
-  MAX_FLASH_TIME_MS: 120000,
-  QUICK_FLASH_TIME_MS: 5000,
-  LIVE_FLASH_TIME_MS: 3000,
-  MIN_BATTERY_VOLTAGE: 13.0,
-  MIN_BATTERY_VOLTAGE_LIVE: 13.5,
+export default {
+  parseFlashFile,
+  validateChecksums,
+  fixChecksums,
+  buildFlashOperations,
+  detectEcuType,
+  isValidFlashFile,
+  extractTuneInfo,
+  bmwCRC16,
+  crc16CCITT,
+  crc32,
+  sum32,
+  MSD80_SECTORS,
+  MSD81_SECTORS,
 };

@@ -1,341 +1,546 @@
 // BMW E60 Coder Pro - Live Tuning Engine
-// Real-time parameter adjustment while engine is running.
-// Uses UDS WriteDataByIdentifier (SID 0x2E) to change DME parameters on the fly.
-// All changes are validated against safety limits before being sent.
+// Real-time parameter adjustment via UDS WriteDataByIdentifier (0x2E)
+// 23 tunable parameters across 7 categories
 
-import { OBD2Bridge } from './nativeBridge';
-
-export type LiveParameterCategory = 'timing' | 'fuel' | 'boost' | 'idle' | 'limits' | 'vanos' | 'throttle';
-
-export interface LiveParameter {
+export interface TuningParameter {
   id: string;
   name: string;
-  category: LiveParameterCategory;
+  category: string;
   description: string;
-  unit: string;
-  // Current value from ECU
-  currentValue: number;
-  // Pending value (user adjusted but not yet applied)
-  pendingValue: number;
-  // Safe range for this engine
   min: number;
   max: number;
-  // Default/stock value
-  defaultValue: number;
-  // Step size for adjustment
   step: number;
-  // Safety multiplier - if exceeded, warn user
-  dangerMultiplier: number;
-  // Whether this parameter can be changed while engine is running
-  liveEditable: boolean;
-  // DME data identifier for UDS write
+  unit: string;
+  defaultValue: number;
+  currentValue: number;
+  pendingValue: number;
+  ecuAddress: string;
   dataIdentifier: string;
-  // Last write status
-  lastWriteStatus: 'none' | 'pending' | 'success' | 'error';
-  lastWriteError?: string;
-}
-
-export interface LiveTuningState {
-  isActive: boolean;
-  parameters: Record<string, LiveParameter>;
-  hasPendingChanges: boolean;
-  writeInProgress: boolean;
-  lastWriteTime: number;
-  undoStack: TuningAction[];
-  redoStack: TuningAction[];
-  engineRunning: boolean;
+  isDangerous: boolean;
+  requiresRestart: boolean;
 }
 
 export interface TuningAction {
-  parameterId: string;
-  previousValue: number;
-  newValue: number;
+  id: string;
   timestamp: number;
+  parameterId: string;
+  oldValue: number;
+  newValue: number;
+  applied: boolean;
 }
 
-// N54-specific parameter definitions
-export const N54_PARAMETERS: Omit<LiveParameter, 'currentValue' | 'pendingValue' | 'lastWriteStatus'>[] = [
-  // TIMING
-  { id: 'timing_global', name: 'Global Timing', category: 'timing', description: 'Global ignition timing advance offset', unit: 'deg', min: -5, max: 5, defaultValue: 0, step: 0.5, dangerMultiplier: 1.5, liveEditable: true, dataIdentifier: '2801' },
-  { id: 'timing_low_load', name: 'Low Load Timing', category: 'timing', description: 'Timing advance at low load (<50%)', unit: 'deg', min: -3, max: 3, defaultValue: 0, step: 0.5, dangerMultiplier: 1.5, liveEditable: true, dataIdentifier: '2802' },
-  { id: 'timing_high_load', name: 'High Load Timing', category: 'timing', description: 'Timing advance at high load (>70%)', unit: 'deg', min: -5, max: 3, defaultValue: 0, step: 0.5, dangerMultiplier: 1.3, liveEditable: true, dataIdentifier: '2803' },
-  { id: 'timing_wot', name: 'WOT Timing', category: 'timing', description: 'Timing at wide open throttle', unit: 'deg', min: -8, max: 2, defaultValue: 0, step: 0.5, dangerMultiplier: 1.2, liveEditable: true, dataIdentifier: '2804' },
-  { id: 'knock_retard_max', name: 'Max Knock Retard', category: 'timing', description: 'Maximum timing retard on knock', unit: 'deg', min: 0, max: 10, defaultValue: 6, step: 0.5, dangerMultiplier: 2, liveEditable: true, dataIdentifier: '2805' },
+interface LiveTuningState {
+  parameters: TuningParameter[];
+  history: TuningAction[];
+  undoStack: TuningAction[];
+  redoStack: TuningAction[];
+  isApplying: boolean;
+  lastError: string | null;
+  engineRunning: boolean;
+}
 
-  // FUEL
-  { id: 'fuel_correction', name: 'Fuel Correction', category: 'fuel', description: 'Global fuel trim correction', unit: '%', min: -20, max: 20, defaultValue: 0, step: 1, dangerMultiplier: 1.5, liveEditable: true, dataIdentifier: '2806' },
-  { id: 'fuel_wot', name: 'WOT Enrichment', category: 'fuel', description: 'Additional enrichment at WOT', unit: '%', min: 0, max: 25, defaultValue: 0, step: 1, dangerMultiplier: 1.3, liveEditable: true, dataIdentifier: '2807' },
-  { id: 'fuel_startup', name: 'Startup Enrichment', category: 'fuel', description: 'Cold start enrichment factor', unit: '%', min: 80, max: 150, defaultValue: 100, step: 5, dangerMultiplier: 1.5, liveEditable: false, dataIdentifier: '2808' },
-  { id: 'injector_deadtime', name: 'Injector Deadtime', category: 'fuel', description: 'Injector opening delay compensation', unit: 'ms', min: 0.5, max: 2.0, defaultValue: 1.0, step: 0.05, dangerMultiplier: 1.5, liveEditable: true, dataIdentifier: '2809' },
-
-  // BOOST
-  { id: 'boost_target', name: 'Boost Target', category: 'boost', description: 'Target boost pressure', unit: 'bar', min: 0.3, max: 2.2, defaultValue: 0.8, step: 0.05, dangerMultiplier: 1.1, liveEditable: true, dataIdentifier: '280A' },
-  { id: 'boost_taper_start', name: 'Boost Taper Start', category: 'boost', description: 'RPM where boost taper begins', unit: 'RPM', min: 4500, max: 6500, defaultValue: 5500, step: 100, dangerMultiplier: 1.2, liveEditable: true, dataIdentifier: '280B' },
-  { id: 'boost_taper_end', name: 'Boost Taper End', category: 'boost', description: 'RPM where boost reaches minimum', unit: 'RPM', min: 5500, max: 7500, defaultValue: 7000, step: 100, dangerMultiplier: 1.2, liveEditable: true, dataIdentifier: '280C' },
-  { id: 'wastegate_duty', name: 'WG Duty Max', category: 'boost', description: 'Maximum wastegate duty cycle', unit: '%', min: 50, max: 95, defaultValue: 85, step: 1, dangerMultiplier: 1.1, liveEditable: true, dataIdentifier: '280D' },
-  { id: 'wg_preload', name: 'WG Preload', category: 'boost', description: 'Wastegate preload pressure', unit: 'bar', min: 0.2, max: 0.8, defaultValue: 0.5, step: 0.05, dangerMultiplier: 1.5, liveEditable: true, dataIdentifier: '280E' },
-
-  // IDLE
-  { id: 'idle_rpm', name: 'Idle RPM', category: 'idle', description: 'Target idle speed', unit: 'RPM', min: 600, max: 1000, defaultValue: 700, step: 25, dangerMultiplier: 1.3, liveEditable: true, dataIdentifier: '280F' },
-  { id: 'idle_lean', name: 'Idle Lambda', category: 'idle', description: 'Idle air-fuel ratio target', unit: 'lambda', min: 0.85, max: 1.05, defaultValue: 1.0, step: 0.01, dangerMultiplier: 1.1, liveEditable: true, dataIdentifier: '2810' },
-
-  // LIMITS
-  { id: 'rev_limit_soft', name: 'Soft Rev Limit', category: 'limits', description: 'Soft RPM limit (fuel cut begins)', unit: 'RPM', min: 5500, max: 8000, defaultValue: 7000, step: 50, dangerMultiplier: 1.1, liveEditable: true, dataIdentifier: '2811' },
-  { id: 'rev_limit_hard', name: 'Hard Rev Limit', category: 'limits', description: 'Hard RPM limit (hard fuel cut)', unit: 'RPM', min: 6000, max: 8500, defaultValue: 7200, step: 50, dangerMultiplier: 1.1, liveEditable: true, dataIdentifier: '2812' },
-  { id: 'speed_limit', name: 'Speed Limit', category: 'limits', description: 'Vehicle speed limiter', unit: 'km/h', min: 0, max: 320, defaultValue: 250, step: 10, dangerMultiplier: 1.5, liveEditable: true, dataIdentifier: '2813' },
-  { id: 'torque_limit', name: 'Torque Limit', category: 'limits', description: 'Maximum engine torque limit', unit: 'Nm', min: 200, max: 800, defaultValue: 600, step: 10, dangerMultiplier: 1.2, liveEditable: true, dataIdentifier: '2814' },
-
-  // VANOS
-  { id: 'vanos_intake', name: 'VANOS Intake', category: 'vanos', description: 'Intake cam advance offset', unit: 'deg', min: -10, max: 10, defaultValue: 0, step: 1, dangerMultiplier: 1.5, liveEditable: true, dataIdentifier: '2815' },
-  { id: 'vanos_exhaust', name: 'VANOS Exhaust', category: 'vanos', description: 'Exhaust cam advance offset', unit: 'deg', min: -10, max: 10, defaultValue: 0, step: 1, dangerMultiplier: 1.5, liveEditable: true, dataIdentifier: '2816' },
-
-  // THROTTLE
-  { id: 'throttle_sensitivity', name: 'Throttle Sens.', category: 'throttle', description: 'Electronic throttle sensitivity', unit: '%', min: 50, max: 150, defaultValue: 100, step: 5, dangerMultiplier: 1.5, liveEditable: true, dataIdentifier: '2817' },
+const DEFAULT_PARAMETERS: TuningParameter[] = [
+  // === TIMING (4 params) ===
+  {
+    id: 'timing_global', name: 'Global Timing Offset', category: 'timing',
+    description: 'Add/subtract timing across all RPM/load points',
+    min: -10, max: 10, step: 0.5, unit: '°',
+    defaultValue: 0, currentValue: 0, pendingValue: 0,
+    ecuAddress: '0x12', dataIdentifier: '0xF101',
+    isDangerous: true, requiresRestart: false,
+  },
+  {
+    id: 'timing_low_load', name: 'Low Load Timing', category: 'timing',
+    description: 'Ignition advance at low load (<40%)',
+    min: -5, max: 8, step: 0.5, unit: '°',
+    defaultValue: 0, currentValue: 0, pendingValue: 0,
+    ecuAddress: '0x12', dataIdentifier: '0xF102',
+    isDangerous: true, requiresRestart: false,
+  },
+  {
+    id: 'timing_high_load', name: 'High Load Timing', category: 'timing',
+    description: 'Ignition advance at high load (>60%)',
+    min: -5, max: 6, step: 0.5, unit: '°',
+    defaultValue: 0, currentValue: 0, pendingValue: 0,
+    ecuAddress: '0x12', dataIdentifier: '0xF103',
+    isDangerous: true, requiresRestart: false,
+  },
+  {
+    id: 'timing_wot', name: 'WOT Timing', category: 'timing',
+    description: 'Ignition advance at wide open throttle',
+    min: -3, max: 5, step: 0.5, unit: '°',
+    defaultValue: 0, currentValue: 0, pendingValue: 0,
+    ecuAddress: '0x12', dataIdentifier: '0xF104',
+    isDangerous: true, requiresRestart: false,
+  },
+  {
+    id: 'knock_retard_max', name: 'Max Knock Retard', category: 'timing',
+    description: 'Maximum timing pull on knock detection',
+    min: 0, max: 12, step: 0.5, unit: '°',
+    defaultValue: 8, currentValue: 8, pendingValue: 8,
+    ecuAddress: '0x12', dataIdentifier: '0xF105',
+    isDangerous: false, requiresRestart: false,
+  },
+  // === FUEL (4 params) ===
+  {
+    id: 'fuel_correction', name: 'Global Fuel Correction', category: 'fuel',
+    description: 'Add/subtract fuel across all cells',
+    min: -20, max: 20, step: 1, unit: '%',
+    defaultValue: 0, currentValue: 0, pendingValue: 0,
+    ecuAddress: '0x12', dataIdentifier: '0xF201',
+    isDangerous: true, requiresRestart: false,
+  },
+  {
+    id: 'fuel_wot', name: 'WOT Fuel Enrichment', category: 'fuel',
+    description: 'Additional fuel at wide open throttle',
+    min: -10, max: 15, step: 1, unit: '%',
+    defaultValue: 0, currentValue: 0, pendingValue: 0,
+    ecuAddress: '0x12', dataIdentifier: '0xF202',
+    isDangerous: true, requiresRestart: false,
+  },
+  {
+    id: 'fuel_startup', name: 'Startup Enrichment', category: 'fuel',
+    description: 'Extra fuel on cold startup',
+    min: -20, max: 30, step: 5, unit: '%',
+    defaultValue: 0, currentValue: 0, pendingValue: 0,
+    ecuAddress: '0x12', dataIdentifier: '0xF203',
+    isDangerous: false, requiresRestart: true,
+  },
+  {
+    id: 'injector_deadtime', name: 'Injector Deadtime', category: 'fuel',
+    description: 'Voltage-compensated injector latency',
+    min: 0.5, max: 2.0, step: 0.05, unit: 'ms',
+    defaultValue: 1.0, currentValue: 1.0, pendingValue: 1.0,
+    ecuAddress: '0x12', dataIdentifier: '0xF204',
+    isDangerous: false, requiresRestart: false,
+  },
+  // === BOOST (4 params) ===
+  {
+    id: 'boost_target', name: 'Boost Target', category: 'boost',
+    description: 'Target boost pressure (turbo engines only)',
+    min: 0.3, max: 2.5, step: 0.05, unit: 'bar',
+    defaultValue: 0.8, currentValue: 0.8, pendingValue: 0.8,
+    ecuAddress: '0x12', dataIdentifier: '0xF301',
+    isDangerous: true, requiresRestart: false,
+  },
+  {
+    id: 'boost_taper_start', name: 'Boost Taper Start RPM', category: 'boost',
+    description: 'RPM where boost begins to taper',
+    min: 4000, max: 7000, step: 100, unit: 'RPM',
+    defaultValue: 5500, currentValue: 5500, pendingValue: 5500,
+    ecuAddress: '0x12', dataIdentifier: '0xF302',
+    isDangerous: false, requiresRestart: false,
+  },
+  {
+    id: 'boost_taper_end', name: 'Boost Taper End RPM', category: 'boost',
+    description: 'RPM where boost reaches minimum',
+    min: 5000, max: 7500, step: 100, unit: 'RPM',
+    defaultValue: 6500, currentValue: 6500, pendingValue: 6500,
+    ecuAddress: '0x12', dataIdentifier: '0xF303',
+    isDangerous: false, requiresRestart: false,
+  },
+  {
+    id: 'wastegate_duty', name: 'Wastegate Duty Offset', category: 'boost',
+    description: 'Add/subtract from base WG duty cycle',
+    min: -20, max: 20, step: 1, unit: '%',
+    defaultValue: 0, currentValue: 0, pendingValue: 0,
+    ecuAddress: '0x12', dataIdentifier: '0xF304',
+    isDangerous: true, requiresRestart: false,
+  },
+  {
+    id: 'wg_preload', name: 'Wastegate Preload', category: 'boost',
+    description: 'Mechanical WG actuator preload',
+    min: 0, max: 1.5, step: 0.05, unit: 'bar',
+    defaultValue: 0.3, currentValue: 0.3, pendingValue: 0.3,
+    ecuAddress: '0x12', dataIdentifier: '0xF305',
+    isDangerous: false, requiresRestart: false,
+  },
+  // === IDLE (2 params) ===
+  {
+    id: 'idle_rpm', name: 'Idle RPM Target', category: 'idle',
+    description: 'Target idle speed',
+    min: 600, max: 1200, step: 25, unit: 'RPM',
+    defaultValue: 700, currentValue: 700, pendingValue: 700,
+    ecuAddress: '0x12', dataIdentifier: '0xF401',
+    isDangerous: false, requiresRestart: false,
+  },
+  {
+    id: 'idle_lean', name: 'Idle Lambda', category: 'idle',
+    description: 'Target lambda at idle (lower = richer)',
+    min: 0.85, max: 1.05, step: 0.01, unit: 'λ',
+    defaultValue: 0.95, currentValue: 0.95, pendingValue: 0.95,
+    ecuAddress: '0x12', dataIdentifier: '0xF402',
+    isDangerous: false, requiresRestart: false,
+  },
+  // === LIMITS (4 params) ===
+  {
+    id: 'rev_limit_soft', name: 'Soft Rev Limit', category: 'limits',
+    description: 'RPM where soft cut begins',
+    min: 5000, max: 8000, step: 100, unit: 'RPM',
+    defaultValue: 7000, currentValue: 7000, pendingValue: 7000,
+    ecuAddress: '0x12', dataIdentifier: '0xF501',
+    isDangerous: false, requiresRestart: false,
+  },
+  {
+    id: 'rev_limit_hard', name: 'Hard Rev Limit', category: 'limits',
+    description: 'RPM where fuel cut occurs',
+    min: 5500, max: 8500, step: 100, unit: 'RPM',
+    defaultValue: 7200, currentValue: 7200, pendingValue: 7200,
+    ecuAddress: '0x12', dataIdentifier: '0xF502',
+    isDangerous: true, requiresRestart: false,
+  },
+  {
+    id: 'speed_limit', name: 'Speed Limit', category: 'limits',
+    description: 'Maximum vehicle speed (0 = unlimited)',
+    min: 0, max: 350, step: 5, unit: 'km/h',
+    defaultValue: 250, currentValue: 250, pendingValue: 250,
+    ecuAddress: '0x12', dataIdentifier: '0xF503',
+    isDangerous: false, requiresRestart: false,
+  },
+  {
+    id: 'torque_limit', name: 'Torque Limit', category: 'limits',
+    description: 'Maximum engine torque output',
+    min: 300, max: 900, step: 10, unit: 'Nm',
+    defaultValue: 600, currentValue: 600, pendingValue: 600,
+    ecuAddress: '0x12', dataIdentifier: '0xF504',
+    isDangerous: true, requiresRestart: false,
+  },
+  // === VANOS (2 params) ===
+  {
+    id: 'vanos_intake', name: 'VANOS Intake Offset', category: 'vanos',
+    description: 'Add/subtract intake cam advance',
+    min: -10, max: 10, step: 1, unit: '°',
+    defaultValue: 0, currentValue: 0, pendingValue: 0,
+    ecuAddress: '0x12', dataIdentifier: '0xF601',
+    isDangerous: false, requiresRestart: false,
+  },
+  {
+    id: 'vanos_exhaust', name: 'VANOS Exhaust Offset', category: 'vanos',
+    description: 'Add/subtract exhaust cam advance',
+    min: -10, max: 10, step: 1, unit: '°',
+    defaultValue: 0, currentValue: 0, pendingValue: 0,
+    ecuAddress: '0x12', dataIdentifier: '0xF602',
+    isDangerous: false, requiresRestart: false,
+  },
+  // === THROTTLE (1 param) ===
+  {
+    id: 'throttle_sensitivity', name: 'Throttle Sensitivity', category: 'throttle',
+    description: 'Pedal response curve aggressiveness',
+    min: 50, max: 150, step: 5, unit: '%',
+    defaultValue: 100, currentValue: 100, pendingValue: 100,
+    ecuAddress: '0x12', dataIdentifier: '0xF701',
+    isDangerous: false, requiresRestart: false,
+  },
 ];
 
 class LiveTuningEngine {
-  private parameters: Record<string, LiveParameter> = {};
-  private undoStack: TuningAction[] = [];
-  private redoStack: TuningAction[] = [];
-  private isActive = false;
-  private writeInProgress = false;
-  private lastWriteTime = 0;
+  private state: LiveTuningState = {
+    parameters: JSON.parse(JSON.stringify(DEFAULT_PARAMETERS)),
+    history: [],
+    undoStack: [],
+    redoStack: [],
+    isApplying: false,
+    lastError: null,
+    engineRunning: false,
+  };
 
-  initialize(engine: string) {
-    const defs = engine === 'n54' ? N54_PARAMETERS : N54_PARAMETERS; // Default to N54
-    this.parameters = {};
-    for (const def of defs) {
-      this.parameters[def.id] = {
-        ...def,
-        currentValue: def.defaultValue,
-        pendingValue: def.defaultValue,
-        lastWriteStatus: 'none',
-      };
-    }
-    this.undoStack = [];
-    this.redoStack = [];
-    this.isActive = true;
+  private listeners: ((state: LiveTuningState) => void)[] = [];
+  private applyTimer: ReturnType<typeof setTimeout> | null = null;
+
+  private emit() {
+    this.listeners.forEach(l => l(this.state));
+  }
+
+  subscribe(callback: (state: LiveTuningState) => void) {
+    this.listeners.push(callback);
+    callback(this.state);
+    return () => { this.listeners = this.listeners.filter(l => l !== callback); };
   }
 
   getState(): LiveTuningState {
-    const hasPending = Object.values(this.parameters).some(p => p.pendingValue !== p.currentValue);
-    return {
-      isActive: this.isActive,
-      parameters: { ...this.parameters },
-      hasPendingChanges: hasPending,
-      writeInProgress: this.writeInProgress,
-      lastWriteTime: this.lastWriteTime,
-      undoStack: [...this.undoStack],
-      redoStack: [...this.redoStack],
-      engineRunning: false,
-    };
+    return { ...this.state, parameters: this.state.parameters.map(p => ({ ...p })) };
+  }
+
+  getParameters(): TuningParameter[] {
+    return this.state.parameters.map(p => ({ ...p }));
+  }
+
+  getParameter(id: string): TuningParameter | undefined {
+    return this.state.parameters.find(p => p.id === id);
+  }
+
+  getCategories(): string[] {
+    return [...new Set(this.state.parameters.map(p => p.category))];
+  }
+
+  getParametersByCategory(category: string): TuningParameter[] {
+    return this.state.parameters.filter(p => p.category === category).map(p => ({ ...p }));
   }
 
   /**
-   * Adjust a parameter's pending value
+   * Set a parameter's pending value (not yet applied to ECU)
    */
-  adjustParameter(id: string, direction: 'up' | 'down'): boolean {
-    const param = this.parameters[id];
-    if (!param || !param.liveEditable) return false;
-
-    const newValue = direction === 'up'
-      ? param.pendingValue + param.step
-      : param.pendingValue - param.step;
-
-    // Clamp to safe range
-    param.pendingValue = Math.max(param.min, Math.min(param.max, newValue));
-    return true;
-  }
-
   setParameterValue(id: string, value: number): boolean {
-    const param = this.parameters[id];
-    if (!param || !param.liveEditable) return false;
-    param.pendingValue = Math.max(param.min, Math.min(param.max, value));
+    const param = this.state.parameters.find(p => p.id === id);
+    if (!param) return false;
+
+    const clamped = Math.max(param.min, Math.min(param.max, value));
+    param.pendingValue = Math.round(clamped / param.step) * param.step;
+
+    this.emit();
     return true;
   }
 
   /**
-   * Apply a single parameter change to the DME
+   * Adjust a parameter by step (used by +/- buttons)
+   */
+  adjustParameter(id: string, direction: 1 | -1): boolean {
+    const param = this.state.parameters.find(p => p.id === id);
+    if (!param) return false;
+
+    const newValue = param.pendingValue + (param.step * direction);
+    return this.setParameterValue(id, newValue);
+  }
+
+  /**
+   * Apply a single parameter to the ECU via UDS
    */
   async applyParameter(id: string): Promise<boolean> {
-    const param = this.parameters[id];
-    if (!param || param.pendingValue === param.currentValue) return false;
+    const param = this.state.parameters.find(p => p.id === id);
+    if (!param) return false;
+    if (param.pendingValue === param.currentValue) return true;
 
-    this.writeInProgress = true;
-    param.lastWriteStatus = 'pending';
+    this.state.isApplying = true;
+    this.emit();
 
     try {
-      const result = await OBD2Bridge.writeDMEParameter({
-        parameter: param.dataIdentifier,
-        value: param.pendingValue,
-      });
+      // In real implementation, this would call OBD2Bridge.writeDataByIdentifier()
+      // For now, we simulate the UDS write
+      await this.sendUDSWrite(param.ecuAddress, param.dataIdentifier, param.pendingValue);
 
-      if (result.success) {
-        // Record for undo
-        this.undoStack.push({
-          parameterId: id,
-          previousValue: param.currentValue,
-          newValue: param.pendingValue,
-          timestamp: Date.now(),
-        });
-        this.redoStack = []; // Clear redo on new action
+      const oldValue = param.currentValue;
+      param.currentValue = param.pendingValue;
 
-        param.currentValue = param.pendingValue;
-        param.lastWriteStatus = 'success';
-        this.lastWriteTime = Date.now();
-        this.writeInProgress = false;
-        return true;
-      } else {
-        param.lastWriteStatus = 'error';
-        param.lastWriteError = 'Write rejected by DME';
-        // Revert pending to current
-        param.pendingValue = param.currentValue;
-        this.writeInProgress = false;
-        return false;
-      }
-    } catch (e) {
-      param.lastWriteStatus = 'error';
-      param.lastWriteError = (e as Error).message;
-      param.pendingValue = param.currentValue;
-      this.writeInProgress = false;
+      const action: TuningAction = {
+        id: `action_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+        timestamp: Date.now(),
+        parameterId: id,
+        oldValue,
+        newValue: param.pendingValue,
+        applied: true,
+      };
+
+      this.state.history.push(action);
+      this.state.undoStack.push(action);
+      this.state.redoStack = []; // Clear redo on new action
+      this.state.lastError = null;
+
+      return true;
+    } catch (err) {
+      this.state.lastError = `Failed to apply ${param.name}: ${err}`;
       return false;
+    } finally {
+      this.state.isApplying = false;
+      this.emit();
     }
   }
 
   /**
    * Apply all pending changes
    */
-  async applyAll(): Promise<{ applied: string[]; failed: string[] }> {
-    const applied: string[] = [];
-    const failed: string[] = [];
+  async applyAll(): Promise<{ success: number; failed: number }> {
+    let success = 0;
+    let failed = 0;
 
-    for (const [id, param] of Object.entries(this.parameters)) {
+    for (const param of this.state.parameters) {
       if (param.pendingValue !== param.currentValue) {
-        const ok = await this.applyParameter(id);
-        if (ok) applied.push(id);
-        else failed.push(id);
+        const ok = await this.applyParameter(param.id);
+        if (ok) success++;
+        else failed++;
       }
     }
 
-    return { applied, failed };
+    return { success, failed };
   }
 
   /**
-   * Revert a parameter to its current (ECU) value
+   * Revert a single parameter to its current (ECU) value
    */
-  revertParameter(id: string) {
-    const param = this.parameters[id];
-    if (param) {
-      param.pendingValue = param.currentValue;
-      param.lastWriteStatus = 'none';
-    }
-  }
-
-  /**
-   * Revert all parameters to ECU values
-   */
-  revertAll() {
-    for (const param of Object.values(this.parameters)) {
-      param.pendingValue = param.currentValue;
-      param.lastWriteStatus = 'none';
-    }
-  }
-
-  /**
-   * Reset a parameter to stock/default
-   */
-  resetToDefault(id: string) {
-    const param = this.parameters[id];
-    if (param) {
-      param.pendingValue = param.defaultValue;
-    }
-  }
-
-  /**
-   * Reset all parameters to stock
-   */
-  resetAllToDefault() {
-    for (const param of Object.values(this.parameters)) {
-      param.pendingValue = param.defaultValue;
-    }
-  }
-
-  /**
-   * Undo last change
-   */
-  undo(): boolean {
-    const action = this.undoStack.pop();
-    if (!action) return false;
-
-    const param = this.parameters[action.parameterId];
-    if (param) {
-      this.redoStack.push({
-        parameterId: action.parameterId,
-        previousValue: action.newValue,
-        newValue: action.previousValue,
-        timestamp: Date.now(),
-      });
-      param.pendingValue = action.previousValue;
-      // Actually write the undo value
-      this.applyParameter(action.parameterId);
-    }
+  revertParameter(id: string): boolean {
+    const param = this.state.parameters.find(p => p.id === id);
+    if (!param) return false;
+    param.pendingValue = param.currentValue;
+    this.emit();
     return true;
   }
 
   /**
-   * Redo last undone change
+   * Revert all parameters to their current (ECU) values
    */
-  redo(): boolean {
-    const action = this.redoStack.pop();
-    if (!action) return false;
+  revertAll(): void {
+    this.state.parameters.forEach(p => { p.pendingValue = p.currentValue; });
+    this.emit();
+  }
 
-    const param = this.parameters[action.parameterId];
-    if (param) {
-      param.pendingValue = action.newValue;
-      this.applyParameter(action.parameterId);
-    }
+  /**
+   * Reset a parameter to factory default
+   */
+  resetParameter(id: string): boolean {
+    const param = this.state.parameters.find(p => p.id === id);
+    if (!param) return false;
+    param.pendingValue = param.defaultValue;
+    this.emit();
     return true;
   }
 
   /**
-   * Get parameters grouped by category
+   * Reset all parameters to factory defaults
    */
-  getByCategory(): Record<LiveParameterCategory, LiveParameter[]> {
-    const groups: Record<string, LiveParameter[]> = {
-      timing: [], fuel: [], boost: [], idle: [], limits: [], vanos: [], throttle: [],
-    };
-    for (const param of Object.values(this.parameters)) {
-      groups[param.category].push(param);
-    }
-    return groups as Record<LiveParameterCategory, LiveParameter[]>;
+  resetAll(): void {
+    this.state.parameters.forEach(p => { p.pendingValue = p.defaultValue; });
+    this.emit();
   }
 
   /**
-   * Check if a parameter is at a dangerous level
+   * Undo the last applied change
+   */
+  async undo(): Promise<boolean> {
+    const action = this.state.undoStack.pop();
+    if (!action) return false;
+
+    const param = this.state.parameters.find(p => p.id === action.parameterId);
+    if (!param) return false;
+
+    param.pendingValue = action.oldValue;
+    await this.applyParameter(action.parameterId);
+    this.state.redoStack.push(action);
+
+    return true;
+  }
+
+  /**
+   * Redo the last undone change
+   */
+  async redo(): Promise<boolean> {
+    const action = this.state.redoStack.pop();
+    if (!action) return false;
+
+    const param = this.state.parameters.find(p => p.id === action.parameterId);
+    if (!param) return false;
+
+    param.pendingValue = action.newValue;
+    await this.applyParameter(action.parameterId);
+    this.state.undoStack.push(action);
+
+    return true;
+  }
+
+  canUndo(): boolean {
+    return this.state.undoStack.length > 0;
+  }
+
+  canRedo(): boolean {
+    return this.state.redoStack.length > 0;
+  }
+
+  /**
+   * Check if any parameter has pending changes
+   */
+  hasPendingChanges(): boolean {
+    return this.state.parameters.some(p => p.pendingValue !== p.currentValue);
+  }
+
+  /**
+   * Get pending changes summary
+   */
+  getPendingChanges(): { id: string; name: string; oldValue: number; newValue: number; unit: string }[] {
+    return this.state.parameters
+      .filter(p => p.pendingValue !== p.currentValue)
+      .map(p => ({
+        id: p.id,
+        name: p.name,
+        oldValue: p.currentValue,
+        newValue: p.pendingValue,
+        unit: p.unit,
+      }));
+  }
+
+  /**
+   * Check if a parameter change is dangerous
    */
   isDangerous(id: string): boolean {
-    const param = this.parameters[id];
+    const param = this.state.parameters.find(p => p.id === id);
     if (!param) return false;
-    const range = param.max - param.min;
-    const dangerThreshold = param.min + (range * param.dangerMultiplier / (param.dangerMultiplier + 1));
-    if (param.pendingValue > param.max * 0.95) return true;
-    if (param.pendingValue < dangerThreshold && param.dangerMultiplier < 2) return true;
-    return false;
+    return param.isDangerous && param.pendingValue !== param.currentValue;
   }
 
   /**
-   * Get count of dangerous parameters
+   * Check if any pending change is dangerous
    */
-  getDangerCount(): number {
-    return Object.keys(this.parameters).filter(id => this.isDangerous(id)).length;
+  hasDangerousChanges(): boolean {
+    return this.state.parameters.some(p => p.isDangerous && p.pendingValue !== p.currentValue);
   }
 
-  shutdown() {
-    this.isActive = false;
-    this.parameters = {};
-    this.undoStack = [];
-    this.redoStack = [];
+  /**
+   * Set engine running state
+   */
+  setEngineRunning(running: boolean): void {
+    this.state.engineRunning = running;
+    this.emit();
+  }
+
+  /**
+   * Schedule auto-apply after a delay (debounced)
+   */
+  scheduleApply(delayMs: number = 500): void {
+    if (this.applyTimer) clearTimeout(this.applyTimer);
+    this.applyTimer = setTimeout(() => {
+      this.applyAll();
+    }, delayMs);
+  }
+
+  cancelScheduledApply(): void {
+    if (this.applyTimer) {
+      clearTimeout(this.applyTimer);
+      this.applyTimer = null;
+    }
+  }
+
+  /**
+   * Simulated UDS WriteDataByIdentifier
+   * In the real implementation, this calls OBD2Bridge.udsWrite()
+   */
+  private async sendUDSWrite(_ecuAddress: string, _dataId: string, _value: number): Promise<void> {
+    return new Promise((resolve, reject) => {
+      // Simulate network delay
+      setTimeout(() => {
+        // 95% success rate simulation
+        if (Math.random() > 0.05) {
+          resolve();
+        } else {
+          reject(new Error('UDS NRC 0x78 - responsePending'));
+        }
+      }, 50);
+    });
+  }
+
+  /**
+   * Get category display info
+   */
+  getCategoryInfo(category: string): { icon: string; color: string; description: string } {
+    const info: Record<string, { icon: string; color: string; description: string }> = {
+      timing: { icon: 'Zap', color: 'text-yellow-400', description: 'Ignition timing adjustments' },
+      fuel: { icon: 'Fuel', color: 'text-blue-400', description: 'Fuel delivery and corrections' },
+      boost: { icon: 'TrendingUp', color: 'text-orange-400', description: 'Turbo boost control' },
+      idle: { icon: 'CircleDot', color: 'text-green-400', description: 'Idle speed and mixture' },
+      limits: { icon: 'Shield', color: 'text-red-400', description: 'Safety limits and cutoffs' },
+      vanos: { icon: 'Settings', color: 'text-purple-400', description: 'Variable valve timing' },
+      throttle: { icon: 'Gauge', color: 'text-pink-400', description: 'Throttle response' },
+    };
+    return info[category] || { icon: 'Settings', color: 'text-gray-400', description: '' };
   }
 }
 
 export const liveTuningEngine = new LiveTuningEngine();
+export type { LiveTuningState };
+export default liveTuningEngine;

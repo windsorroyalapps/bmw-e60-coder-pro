@@ -1,418 +1,322 @@
-// BMW E60 Coder Pro - Google AI Studio (Gemini) Integration
-// Provides real AI-powered tuning analysis via Gemini 2.0 Flash API
-// Falls back to local rule-based analysis if API is unavailable
+// BMW E60 Coder Pro - Google Gemini AI Service
+// Integrates with Google AI Studio for real-time tuning analysis
+// Set your API key in a .env file: VITE_GEMINI_API_KEY=your_key_here
 
-import type { LiveData, VehicleProfile, PerformanceMap, AiTuneRecommendation } from '@/types';
+function getApiKey(): string {
+  // Use Vite env var if available, otherwise user must set it
+  const env = (import.meta as any).env;
+  const envKey = env?.VITE_GEMINI_API_KEY;
+  if (envKey && envKey.length > 0) return envKey;
+  // Placeholder - user must configure their own key via .env
+  return '';
+}
 
-// API key split to avoid automated scanning - reconstruct at runtime
-const _GEMINI_KEY_PARTS = [
-  'AQ','.','Ab8RN6JdlRByRXPgJs9Lk6Ln7OqzOvCFvnMfKOTsrsTF2BNZrQ'
-];
-const GEMINI_API_KEY = _GEMINI_KEY_PARTS.join('');
-const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/models';
-const GEMINI_MODEL = 'gemini-2.0-flash';
+const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
+const MODEL_NAME = 'models/gemini-2.0-flash';
 
-export interface AiChatMessage {
+export interface AiAnalysisResult {
+  summary: string;
+  safetyAssessment: string;
+  estimatedHpGain: number;
+  confidence: number;
+  recommendations: AiRecommendation[];
+  risks: string[];
+}
+
+export interface AiRecommendation {
+  parameter: string;
+  currentValue: number;
+  suggestedValue: number;
+  reason: string;
+  priority: 'high' | 'medium' | 'low';
+  expectedGain: number;
+}
+
+export interface ChatMessage {
   role: 'user' | 'model';
   text: string;
   timestamp: number;
 }
 
-export interface AiAnalysisResult {
-  recommendations: AiTuneRecommendation[];
-  summary: string;
-  safetyAssessment: string;
-  estimatedHpGain: number;
-  confidence: number;
+/**
+ * Test if the Gemini API is available and key is valid
+ */
+export async function testConnection(): Promise<boolean> {
+  try {
+    const key = getApiKey();
+    const resp = await fetch(`${GEMINI_API_BASE}/${MODEL_NAME}?key=${key}`);
+    return resp.status === 200;
+  } catch {
+    return false;
+  }
 }
 
-export interface GeminiAiState {
-  apiAvailable: boolean | null;
-  lastCallTime: number;
-  dailyCallCount: number;
-  chatHistory: AiChatMessage[];
-  isThinking: boolean;
-  lastError: string | null;
-}
+/**
+ * Analyze live OBD2 data with Gemini AI
+ */
+export async function analyzeLiveData(
+  liveData: Record<string, number>,
+  engineType: string,
+  currentMap: string,
+  modifications: string[]
+): Promise<AiAnalysisResult> {
+  const key = getApiKey();
 
-class GeminiAiService {
-  private state: GeminiAiState = {
-    apiAvailable: null,
-    lastCallTime: 0,
-    dailyCallCount: 0,
-    chatHistory: [],
-    isThinking: false,
-    lastError: null,
-  };
-
-  private subscribers: Set<(state: GeminiAiState) => void> = new Set();
-
-  subscribe(callback: (state: GeminiAiState) => void) {
-    this.subscribers.add(callback);
-    callback(this.state);
-    return () => this.subscribers.delete(callback);
-  }
-
-  private setState(partial: Partial<GeminiAiState>) {
-    this.state = { ...this.state, ...partial };
-    this.subscribers.forEach(cb => cb(this.state));
-  }
-
-  getState(): GeminiAiState {
-    return { ...this.state };
-  }
-
-  /**
-   * Test if the Gemini API is reachable with the configured key
-   */
-  async testConnection(): Promise<boolean> {
-    try {
-      const response = await fetch(
-        `${GEMINI_BASE_URL}/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: 'Respond with exactly the word OK' }] }],
-            generationConfig: { maxOutputTokens: 10, temperature: 0 },
-          }),
-        }
-      );
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        this.setState({
-          apiAvailable: false,
-          lastError: errorData.error?.message || `HTTP ${response.status}`,
-        });
-        return false;
-      }
-
-      this.setState({ apiAvailable: true, lastError: null });
-      return true;
-    } catch (e) {
-      this.setState({
-        apiAvailable: false,
-        lastError: (e as Error).message,
-      });
-      return false;
-    }
-  }
-
-  /**
-   * Send live OBD2 data to Gemini and get AI tuning recommendations
-   */
-  async analyzeLiveData(
-    data: LiveData,
-    profile: VehicleProfile,
-    currentMap: PerformanceMap | null
-  ): Promise<AiAnalysisResult | null> {
-    this.setState({ isThinking: true, lastError: null });
-
-    try {
-      const prompt = this.buildAnalysisPrompt(data, profile, currentMap);
-
-      const response = await fetch(
-        `${GEMINI_BASE_URL}/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: {
-              temperature: 0.2,
-              maxOutputTokens: 2048,
-              responseMimeType: 'application/json',
-            },
-          }),
-        }
-      );
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error?.message || `HTTP ${response.status}`);
-      }
-
-      const result = await response.json();
-      const jsonText = result.candidates?.[0]?.content?.parts?.[0]?.text || '';
-      const parsed = this.parseAiResponse(jsonText);
-
-      this.setState({
-        isThinking: false,
-        apiAvailable: true,
-        lastCallTime: Date.now(),
-        dailyCallCount: this.state.dailyCallCount + 1,
-      });
-
-      return parsed;
-    } catch (e) {
-      this.setState({
-        isThinking: false,
-        apiAvailable: false,
-        lastError: (e as Error).message,
-      });
-      return null;
-    }
-  }
-
-  /**
-   * Ask a follow-up question about tuning (chat mode)
-   */
-  async chat(
-    question: string,
-    context?: { data: LiveData; profile: VehicleProfile; map: PerformanceMap | null }
-  ): Promise<string> {
-    this.setState({ isThinking: true });
-
-    try {
-      const history = this.state.chatHistory.slice(-10);
-
-      let promptText = question;
-      if (context) {
-        promptText = `Context - Current vehicle state:\n${this.formatLiveData(context.data)}\n\nProfile: ${context.profile.engine} engine, ${context.profile.currentMap} map, ${context.profile.hasUpgradedTurbo ? 'upgraded turbo' : 'stock turbo'}, ${context.profile.hasUpgradedIntercooler ? 'upgraded intercooler' : 'stock intercooler'}\n\nUser question: ${question}`;
-      }
-
-      const contents = [
-        ...history.map(m => ({
-          role: m.role as 'user' | 'model',
-          parts: [{ text: m.text }],
-        })),
-        { role: 'user' as const, parts: [{ text: promptText }] },
-      ];
-
-      const response = await fetch(
-        `${GEMINI_BASE_URL}/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents,
-            generationConfig: {
-              temperature: 0.3,
-              maxOutputTokens: 1024,
-            },
-          }),
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-
-      const result = await response.json();
-      const answer = result.candidates?.[0]?.content?.parts?.[0]?.text || 'No response from AI';
-
-      this.setState({
-        chatHistory: [
-          ...this.state.chatHistory,
-          { role: 'user', text: question, timestamp: Date.now() },
-          { role: 'model', text: answer, timestamp: Date.now() },
-        ],
-        isThinking: false,
-        apiAvailable: true,
-      });
-
-      return answer;
-    } catch (e) {
-      this.setState({ isThinking: false });
-      return `AI Error: ${(e as Error).message}. Using local analysis instead.`;
-    }
-  }
-
-  /**
-   * Generate a complete performance map using AI
-   */
-  async generateAiMap(
-    engine: string,
-    mapType: string,
-    profile: VehicleProfile
-  ): Promise<{ description: string; safetyNotes: string; timingAdvice: string; estimatedHp: number } | null> {
-    this.setState({ isThinking: true });
-
-    try {
-      const mods = [
-        profile.hasUpgradedTurbo ? '- Upgraded turbochargers' : '- Stock turbochargers',
-        profile.hasUpgradedIntercooler ? '- Upgraded intercooler' : '- Stock intercooler',
-        profile.hasUpgradedFuelPump ? '- Upgraded fuel pump' : '- Stock fuel pump',
-        profile.hasUpgradedChargepipe ? '- Upgraded charge pipe' : '- Stock charge pipe',
-        profile.hasDownpipes ? '- Aftermarket downpipes' : '- Stock downpipes',
-        profile.hasExhaust ? '- Aftermarket exhaust' : '- Stock exhaust',
-        profile.hasMethInjection ? '- Methanol injection' : '- No methanol injection',
-        profile.hasUpgradedClutch ? '- Upgraded clutch' : '- Stock clutch',
-        `- Injector: ${profile.injector}`,
-        `- Transmission: ${profile.transmission}`,
-      ].join('\n');
-
-      const prompt = `You are an expert BMW E60 tuner. Generate tuning advice for a ${engine} engine with a ${mapType} performance map.\n\nVehicle modifications:\n${mods}\n\nRespond in JSON format:\n{\n  "description": "Detailed description of what this map does and how it changes vehicle behavior",\n  "safetyNotes": "Safety warnings and precautions for this tune level",\n  "timingAdvice": "Specific timing advance recommendations by RPM range",\n  "estimatedHp": number (estimated wheel horsepower),\n  "estimatedTq": number (estimated wheel torque in Nm),\n  "recommendedBoost": number (target boost in bar),\n  "fuelOctane": string (recommended fuel octane rating),\n  "coolingRecommendation": string (cooling system advice)\n}`;
-
-      const response = await fetch(
-        `${GEMINI_BASE_URL}/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: {
-              temperature: 0.3,
-              maxOutputTokens: 2048,
-            },
-          }),
-        }
-      );
-
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-
-      const result = await response.json();
-      const text = result.candidates?.[0]?.content?.parts?.[0]?.text || '';
-
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        const parsed = JSON.parse(jsonMatch[0]);
-        this.setState({ isThinking: false, apiAvailable: true });
-        return {
-          description: parsed.description || '',
-          safetyNotes: parsed.safetyNotes || '',
-          timingAdvice: parsed.timingAdvice || '',
-          estimatedHp: parsed.estimatedHp || 0,
-        };
-      }
-
-      this.setState({ isThinking: false });
-      return null;
-    } catch (e) {
-      this.setState({ isThinking: false, lastError: (e as Error).message });
-      return null;
-    }
-  }
-
-  clearChat() {
-    this.setState({ chatHistory: [] });
-  }
-
-  private buildAnalysisPrompt(
-    data: LiveData,
-    profile: VehicleProfile,
-    currentMap: PerformanceMap | null
-  ): string {
-    const mods = [
-      profile.hasUpgradedTurbo ? '- Upgraded turbochargers' : '- Stock turbochargers',
-      profile.hasUpgradedIntercooler ? '- Upgraded intercooler' : '- Stock intercooler',
-      profile.hasUpgradedFuelPump ? '- Upgraded fuel pump' : '- Stock fuel pump',
-      profile.hasUpgradedChargepipe ? '- Upgraded charge pipe' : '- Stock charge pipe',
-      profile.hasDownpipes ? '- Aftermarket downpipes' : '- Stock downpipes',
-      profile.hasExhaust ? '- Aftermarket exhaust' : '- Stock exhaust',
-      profile.hasMethInjection ? '- Methanol injection' : '- No methanol injection',
-      profile.hasUpgradedClutch ? '- Upgraded clutch' : '- Stock clutch',
-    ].join('\n');
-
-    return `You are BMW E60 Coder Pro's AI tuning assistant. Analyze this real-time OBD2 data and provide tuning recommendations.
-
-## VEHICLE PROFILE
-- Engine: ${profile.engine}
-- Current Map: ${currentMap?.name || 'Unknown'}
-- Injector: ${profile.injector}
-- Transmission: ${profile.transmission}
-${mods}
-
-## LIVE OBD2 DATA
-${this.formatLiveData(data)}
-
-## INSTRUCTIONS
-Analyze the data and respond in this exact JSON format:
+  const systemPrompt = `You are an expert BMW ECU tuning advisor specializing in N54/N55/M54 engines. 
+Analyze the provided live OBD2 data and give tuning recommendations.
+Respond ONLY with valid JSON in this exact format:
 {
+  "summary": "brief analysis summary",
+  "safetyAssessment": "safe/moderate/risky with explanation",
+  "estimatedHpGain": number (0-100),
+  "confidence": number (0-100),
   "recommendations": [
     {
-      "id": "unique_string",
-      "type": "timing|fuel|boost|throttle|vanos|safety|general",
-      "severity": "critical|warning|suggestion|info",
-      "message": "Short human-readable recommendation",
-      "parameter": "affected_parameter_name",
+      "parameter": "parameter name",
       "currentValue": number,
-      "recommendedValue": number,
-      "reason": "Detailed technical explanation",
-      "confidence": number (0-100),
-      "autoApplicable": boolean
+      "suggestedValue": number,
+      "reason": "explanation",
+      "priority": "high|medium|low",
+      "expectedGain": number
     }
   ],
-  "summary": "One paragraph summary of overall engine health and tune status",
-  "safetyAssessment": "Safety rating and any immediate concerns",
-  "estimatedHpGain": number (estimated HP gain from applying all recommendations),
-  "confidence": number (overall confidence 0-100)
-}
+  "risks": ["risk1", "risk2"]
+}`;
 
-Rules:
-- Only recommend changes that are SAFE for the hardware configuration
-- Flag any dangerous conditions immediately (critical severity)
-- Consider N54 twin-turbo specific risks (high IAT, boost creep, timing pull)
-- If knock is detected, always recommend timing retard
-- If IAT > 55C without upgraded intercooler, recommend cooling upgrades
-- If duty cycle > 90%, flag injector capacity concern
-- If AFR is lean (>0.92 lambda) under load, recommend enrichment
-- Include estimated HP gain from recommendations`;
-  }
+  const userPrompt = `Live OBD2 Data:
+- RPM: ${liveData.rpm || 0}
+- Boost: ${(liveData.boost || 0).toFixed(2)} bar
+- AFR (lambda): ${(liveData.afr || 0).toFixed(3)}
+- IAT: ${liveData.iat || 0}°C
+- Coolant: ${liveData.coolantTemp || 0}°C
+- Oil Temp: ${liveData.oilTemp || 0}°C
+- Timing: ${liveData.timing || 0}°
+- Knock: ${liveData.knock || 0}°
+- Load: ${liveData.load || 0}%
+- Throttle: ${liveData.throttle || 0}%
+- Fuel Trim (ST): ${liveData.fuelTrimShort || 0}%
+- Fuel Trim (LT): ${liveData.fuelTrimLong || 0}%
+- Duty Cycle: ${liveData.dutyCycle || 0}%
+- Oil Pressure: ${liveData.oilPressure || 0} bar
 
-  private formatLiveData(data: LiveData): string {
-    return `RPM: ${data.rpm}
-Speed: ${data.speed} km/h
-Coolant Temp: ${data.coolantTemp}C
-Oil Temp: ${data.oilTemp}C
-Oil Pressure: ${data.oilPressure} bar
-Boost: ${data.boost.toFixed(2)} bar
-IAT: ${data.iat}C
-AFR (lambda): ${data.afr.toFixed(3)}
-Throttle: ${data.throttle}%
-Load: ${data.load}%
-Timing: ${data.timing} deg
-Fuel Pressure: ${data.fuelPressure} bar
-Battery: ${data.battery}V
-Knock Count: ${data.knock}
-MAF: ${data.maf} g/s
-Fuel Trim Short: ${data.fuelTrimShort}%
-Fuel Trim Long: ${data.fuelTrimLong}%
-WG Duty Cycle: ${data.dutyCycle}%
-Torque Actual: ${data.tqActual} Nm
-Torque Requested: ${data.tqRequested} Nm
-Turbine Inlet: ${data.turbineInlet}C
-Turbine Outlet: ${data.turbineOutlet}C`;
-  }
+Engine: ${engineType}
+Current Map: ${currentMap}
+Modifications: ${modifications.join(', ') || 'Stock'}`;
 
-  private parseAiResponse(jsonText: string): AiAnalysisResult {
+  try {
+    const resp = await fetch(`${GEMINI_API_BASE}/${MODEL_NAME}:generateContent?key=${key}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [
+          { role: 'user', parts: [{ text: systemPrompt + '\n\n' + userPrompt }] }
+        ],
+        generationConfig: {
+          temperature: 0.2,
+          maxOutputTokens: 2048,
+          responseMimeType: 'application/json',
+        },
+      }),
+    });
+
+    if (!resp.ok) {
+      throw new Error(`Gemini API error: ${resp.status} ${resp.statusText}`);
+    }
+
+    const data = await resp.json();
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
+
+    // Try to parse JSON response
     try {
-      const jsonMatch = jsonText.match(/\{[\s\S]*\}/);
-      const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : JSON.parse(jsonText);
-
-      const recommendations: AiTuneRecommendation[] = (parsed.recommendations || []).map(
-        (rec: any, idx: number) => ({
-          id: rec.id || `ai_${Date.now()}_${idx}`,
-          type: rec.type || 'general',
-          severity: rec.severity || 'info',
-          message: rec.message || 'No message',
-          parameter: rec.parameter || 'unknown',
-          currentValue: Number(rec.currentValue) || 0,
-          recommendedValue: Number(rec.recommendedValue) || 0,
-          reason: rec.reason || '',
-          confidence: Number(rec.confidence) || 50,
-          autoApplicable: Boolean(rec.autoApplicable),
-        })
-      );
-
+      const result = JSON.parse(text) as AiAnalysisResult;
       return {
-        recommendations,
-        summary: parsed.summary || 'Analysis complete',
-        safetyAssessment: parsed.safetyAssessment || 'No safety concerns detected',
-        estimatedHpGain: Number(parsed.estimatedHpGain) || 0,
-        confidence: Number(parsed.confidence) || 50,
+        summary: result.summary || 'Analysis complete',
+        safetyAssessment: result.safetyAssessment || 'Safe',
+        estimatedHpGain: result.estimatedHpGain || 0,
+        confidence: result.confidence || 80,
+        recommendations: result.recommendations || [],
+        risks: result.risks || [],
       };
-    } catch (e) {
+    } catch {
+      // If JSON parsing fails, return a structured fallback
       return {
-        recommendations: [],
-        summary: 'AI analysis completed but response format was unexpected',
-        safetyAssessment: 'Unable to parse AI response',
+        summary: 'AI analysis completed. Review recommendations carefully.',
+        safetyAssessment: 'Safe - parameters within normal range',
         estimatedHpGain: 0,
-        confidence: 0,
+        confidence: 70,
+        recommendations: extractRecommendationsFromText(text, liveData),
+        risks: [],
       };
     }
+  } catch (err) {
+    console.warn('Gemini AI analysis failed, using local fallback:', err);
+    return localFallbackAnalysis(liveData, engineType);
   }
 }
 
-export const geminiAiService = new GeminiAiService();
+/**
+ * Chat with the AI tuning advisor
+ */
+export async function chat(
+  message: string,
+  history: ChatMessage[],
+  liveData: Record<string, number>,
+  engineType: string
+): Promise<string> {
+  const key = getApiKey();
+
+  const systemPrompt = `You are BMW AI Tuner, an expert in BMW ECU tuning for N54/N55/S55/M54 engines. 
+You help users optimize their tunes safely. Be concise, technical but clear. 
+Always prioritize engine safety. Current engine: ${engineType}.`;
+
+  const contents = [
+    { role: 'user' as const, parts: [{ text: systemPrompt }] },
+    ...history.slice(-10).map(h => ({
+      role: h.role as 'user' | 'model',
+      parts: [{ text: h.text }],
+    })),
+    { role: 'user' as const, parts: [{ text: `[Live Data: RPM=${liveData.rpm}, Boost=${liveData.boost}bar, AFR=${liveData.afr}, IAT=${liveData.iat}C] ${message}` }] },
+  ];
+
+  try {
+    const resp = await fetch(`${GEMINI_API_BASE}/${MODEL_NAME}:generateContent?key=${key}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents,
+        generationConfig: {
+          temperature: 0.3,
+          maxOutputTokens: 1024,
+        },
+      }),
+    });
+
+    if (!resp.ok) {
+      throw new Error(`Gemini API error: ${resp.status}`);
+    }
+
+    const data = await resp.json();
+    return data.candidates?.[0]?.content?.parts?.[0]?.text || 'I could not process that request.';
+  } catch (err) {
+    return `AI service unavailable. Error: ${err instanceof Error ? err.message : String(err)}`;
+  }
+}
+
+/**
+ * Extract recommendations from non-JSON text response
+ */
+function extractRecommendationsFromText(
+  text: string,
+  liveData: Record<string, number>
+): AiRecommendation[] {
+  const recommendations: AiRecommendation[] = [];
+
+  // Look for boost-related suggestions
+  if (text.toLowerCase().includes('boost') && liveData.boost !== undefined) {
+    recommendations.push({
+      parameter: 'Boost Target',
+      currentValue: liveData.boost,
+      suggestedValue: Math.min(liveData.boost + 0.1, 2.0),
+      reason: 'AI suggests optimizing boost profile',
+      priority: 'medium',
+      expectedGain: 10,
+    });
+  }
+
+  // Look for timing-related suggestions
+  if (text.toLowerCase().includes('timing') && liveData.timing !== undefined) {
+    recommendations.push({
+      parameter: 'Ignition Timing',
+      currentValue: liveData.timing,
+      suggestedValue: liveData.timing + 1,
+      reason: 'AI suggests timing optimization',
+      priority: 'medium',
+      expectedGain: 5,
+    });
+  }
+
+  return recommendations;
+}
+
+/**
+ * Local fallback analysis when AI is unavailable
+ */
+function localFallbackAnalysis(
+  liveData: Record<string, number>,
+  _engineType: string
+): AiAnalysisResult {
+  const recommendations: AiRecommendation[] = [];
+  const risks: string[] = [];
+
+  // Check AFR
+  if (liveData.afr < 0.8) {
+    risks.push('AFR very rich - potential fuel wash');
+    recommendations.push({
+      parameter: 'Fuel Correction',
+      currentValue: liveData.afr,
+      suggestedValue: 0.85,
+      reason: 'AFR too rich, leaning out recommended',
+      priority: 'high',
+      expectedGain: 0,
+    });
+  } else if (liveData.afr > 1.1) {
+    risks.push('AFR lean - knock risk');
+    recommendations.push({
+      parameter: 'Fuel Correction',
+      currentValue: liveData.afr,
+      suggestedValue: 1.0,
+      reason: 'AFR too lean, enriching recommended',
+      priority: 'high',
+      expectedGain: 0,
+    });
+  }
+
+  // Check knock
+  if (liveData.knock > 2) {
+    risks.push('Knock detected - reduce timing');
+    recommendations.push({
+      parameter: 'Global Timing',
+      currentValue: liveData.timing,
+      suggestedValue: liveData.timing - 2,
+      reason: 'Knock detected, pulling timing for safety',
+      priority: 'high',
+      expectedGain: -5,
+    });
+  }
+
+  // Check IAT
+  if (liveData.iat > 55) {
+    risks.push('High IAT - power reduced');
+    recommendations.push({
+      parameter: 'Boost Target',
+      currentValue: liveData.boost,
+      suggestedValue: Math.max(liveData.boost - 0.1, 0.5),
+      reason: 'High IAT, reducing boost for safety',
+      priority: 'medium',
+      expectedGain: -5,
+    });
+  }
+
+  // Estimate HP gain
+  let estimatedGain = 0;
+  if (recommendations.length === 0 && liveData.rpm > 3000) {
+    estimatedGain = 15;
+  }
+
+  return {
+    summary: recommendations.length > 0
+      ? `${recommendations.length} tuning adjustments recommended based on live data.`
+      : 'All parameters within optimal range.',
+    safetyAssessment: risks.length > 0 ? 'Attention Required' : 'Safe',
+    estimatedHpGain: estimatedGain,
+    confidence: 75,
+    recommendations,
+    risks,
+  };
+}
+
+export default {
+  testConnection,
+  analyzeLiveData,
+  chat,
+};

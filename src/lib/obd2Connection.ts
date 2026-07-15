@@ -128,473 +128,181 @@ export class OBD2ConnectionManager {
     }
   }
 
-  // ==================== CONNECTION WATCHDOG ====================
-
-  /**
-   * Enable the connection watchdog. Detects USB disconnect within 500ms
-   * and triggers the callback for auto-recovery and flash abort.
-   */
-  enableWatchdog(callback?: () => void): void {
-    if (this.watchdogTimer) {
-      clearInterval(this.watchdogTimer);
-    }
-    this.watchdogEnabled = true;
-    this.lastHeartbeat = Date.now();
-    if (callback) this.onConnectionDeadCallback = callback;
-
-    this.watchdogTimer = setInterval(() => {
-      if (!this.watchdogEnabled) return;
-      if (this.state.connectionState !== 'connected') return;
-
-      const elapsed = Date.now() - this.lastHeartbeat;
-      if (elapsed > this.heartbeatTimeoutMs) {
-        // Connection is dead - cable pulled or USB error
-        this.handleConnectionDead();
-      }
-    }, 200); // Check every 200ms for sub-500ms detection
+  getState(): OBD2State {
+    return { ...this.state };
   }
 
-  disableWatchdog(): void {
+  // === Cable Detection ===
+  async detectCable(): Promise<CableInfo | null> {
+    try {
+      const info = await OBD2Bridge.detectCable();
+      if (info) {
+        this.state.cable = info;
+        this.emit();
+      }
+      return info;
+    } catch {
+      return null;
+    }
+  }
+
+  // === Connection ===
+  async connect(): Promise<boolean> {
+    this.state.connectionState = 'connecting';
+    this.emit();
+
+    try {
+      await OBD2Bridge.connect();
+      this.state.connectionState = 'handshaking';
+      this.emit();
+
+      // After connect, query ECUs
+      const ecus = await OBD2Bridge.queryECUs();
+      if (ecus && ecus.length > 0) {
+        this.state.ecus = ecus;
+        this.state.connectionState = 'connected';
+        this.state.lastActivity = Date.now();
+        this.emit();
+        this.startWatchdog();
+        return true;
+      } else {
+        this.state.connectionState = 'error';
+        this.state.lastError = 'No ECUs responded to query';
+        this.emit();
+        return false;
+      }
+    } catch (err: any) {
+      this.state.connectionState = 'error';
+      this.state.lastError = err?.message || 'Connection failed';
+      this.emit();
+      return false;
+    }
+  }
+
+  disconnect() {
+    try {
+      OBD2Bridge.disconnect();
+    } catch {
+      // Ignore disconnect errors
+    }
+    this.state.connectionState = 'disconnected';
+    this.state.cable = null;
+    this.state.protocol = 'none';
+    this.state.ecus = [];
+    this.state.diagnostics = null;
+    this.state.lastError = null;
+    this.state.dmeProtocolVersion = '';
+    this.emit();
+    this.stopWatchdog();
+  }
+
+  // === Live Data ===
+  async readLiveData(): Promise<Record<string, number> | null> {
+    try {
+      const data = await OBD2Bridge.readLiveData();
+      if (data) {
+        this.state.lastActivity = Date.now();
+        if (data.batteryVoltage) this.state.batteryVoltage = data.batteryVoltage;
+        if (data.rpm) this.state.rpm = data.rpm;
+      }
+      return data;
+    } catch {
+      return null;
+    }
+  }
+
+  // === Flash / Backup ===
+  async addBackupProgressListener(callback: (event: FlashProgressEvent) => void): Promise<() => void> {
+    return OBD2Bridge.addBackupProgressListener(callback);
+  }
+
+  async backupDME(): Promise<{ success: boolean; backup?: any; error?: string }> {
+    try {
+      return await OBD2Bridge.backupDME();
+    } catch (err: any) {
+      return { success: false, error: err?.message };
+    }
+  }
+
+  async restoreDME(backupId: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      return await OBD2Bridge.restoreDME(backupId);
+    } catch (err: any) {
+      return { success: false, error: err?.message };
+    }
+  }
+
+  async readDMEInfo(): Promise<{ vin: string; ecuType: string; software: string } | null> {
+    try {
+      return await OBD2Bridge.readDMEInfo();
+    } catch {
+      return null;
+    }
+  }
+
+  async startFlash(isLive: boolean): Promise<{ success: boolean; session?: FlashSession }> {
+    try {
+      const result = await OBD2Bridge.startFlash(isLive);
+      if (result.session) {
+        this.flashSession = result.session;
+        this.emitFlash();
+      }
+      return result;
+    } catch (err: any) {
+      return { success: false };
+    }
+  }
+
+  executeFlash() {
+    OBD2Bridge.executeFlash();
+  }
+
+  abortFlash() {
+    OBD2Bridge.abortFlash();
+    if (this.flashSession) {
+      this.flashSession.status = 'aborted';
+      this.emitFlash();
+    }
+  }
+
+  // === Watchdog ===
+  enableWatchdog(timeoutMs: number = 500, onDead: () => void) {
+    this.watchdogEnabled = true;
+    this.heartbeatTimeoutMs = timeoutMs;
+    this.onConnectionDeadCallback = onDead;
+    this.startWatchdog();
+  }
+
+  disableWatchdog() {
     this.watchdogEnabled = false;
+    this.onConnectionDeadCallback = null;
+    this.stopWatchdog();
+  }
+
+  private startWatchdog() {
+    if (this.watchdogTimer) return;
+    this.lastHeartbeat = Date.now();
+    this.watchdogTimer = setInterval(() => {
+      const elapsed = Date.now() - this.lastHeartbeat;
+      if (elapsed > this.heartbeatTimeoutMs) {
+        if (this.onConnectionDeadCallback) {
+          this.onConnectionDeadCallback();
+        }
+      }
+    }, 100);
+  }
+
+  private stopWatchdog() {
     if (this.watchdogTimer) {
       clearInterval(this.watchdogTimer);
       this.watchdogTimer = null;
     }
   }
 
-  /** Update heartbeat - call this on every successful OBD2 communication */
-  heartbeat(): void {
+  heartbeat() {
     this.lastHeartbeat = Date.now();
-  }
-
-  getLastHeartbeat(): number {
-    return this.lastHeartbeat;
-  }
-
-  isConnectionAlive(): boolean {
-    if (this.state.connectionState !== 'connected') return false;
-    return (Date.now() - this.lastHeartbeat) <= this.heartbeatTimeoutMs;
-  }
-
-  isWatchdogEnabled(): boolean {
-    return this.watchdogEnabled;
-  }
-
-  private handleConnectionDead(): void {
-    // Abort any active flash session first (critical safety)
-    if (this.flashSession &&
-        (this.flashSession.status === 'preparing' ||
-         this.flashSession.status === 'flashing')) {
-      this.abortFlash();
-    }
-
-    // Mark connection as dead
-    this.updateState({
-      connectionState: 'error',
-      lastError: `Connection lost - no heartbeat for ${Date.now() - this.lastHeartbeat}ms`,
-      lastActivity: Date.now(),
-    });
-
-    // Notify callback for auto-recovery
-    if (this.onConnectionDeadCallback) {
-      this.onConnectionDeadCallback();
-    }
-  }
-
-  /**
-   * Attempt auto-recovery with exponential backoff.
-   * Returns true if reconnected successfully.
-   */
-  async attemptRecovery(): Promise<boolean> {
-    try {
-      // Try to re-detect and connect
-      const cable = await this.detectCable();
-      if (!cable) return false;
-
-      const connected = await this.connect();
-      if (connected) {
-        this.lastHeartbeat = Date.now();
-        return true;
-      }
-      return false;
-    } catch (e) {
-      return false;
-    }
-  }
-
-  getState(): OBD2State {
-    return { ...this.state };
-  }
-
-  async detectCable(): Promise<CableInfo | null> {
-    this.updateState({ connectionState: 'searching', lastError: null });
-    try {
-      const result = await OBD2Bridge.detectCable();
-      if (result.found && result.cable) {
-        const cable: CableInfo = {
-          type: result.cable.type as CableType,
-          vendorId: result.cable.vendorId,
-          productId: result.cable.productId,
-          serialNumber: result.cable.serialNumber,
-          driverVersion: result.cable.driverVersion,
-          baudRate: result.cable.baudRate,
-          isGenuine: result.cable.isGenuine,
-          detectedChip: result.cable.detectedChip as any,
-        };
-        this.updateState({ cable, lastError: null });
-        return cable;
-      } else {
-        this.updateState({
-          connectionState: 'error',
-          lastError: result.error || 'No K+DCAN cable detected. Check USB OTG connection.',
-        });
-        return null;
-      }
-    } catch (e: any) {
-      this.updateState({
-        connectionState: 'error',
-        lastError: 'Cable detection failed: ' + (e?.message || String(e)),
-      });
-      return null;
-    }
-  }
-
-  async connect(): Promise<boolean> {
-    if (!this.state.cable) {
-      const cable = await this.detectCable();
-      if (!cable) return false;
-    }
-    this.updateState({ connectionState: 'connecting' });
-    try {
-      const result = await OBD2Bridge.connect();
-      if (result.success) {
-        const ecus: ECUInfo[] = (result.ecus || []).map(e => ({
-          name: e.name,
-          address: e.address,
-          protocol: e.protocol,
-          status: e.status as 'online' | 'offline' | 'faulty',
-          firmwareVersion: e.firmwareVersion,
-          lastResponse: e.lastResponse,
-          faultCodes: e.faultCodes,
-        }));
-        this.updateState({
-          connectionState: 'connected',
-          protocol: (result.protocol || 'k_dcan') as ProtocolType,
-          ecus,
-          batteryVoltage: result.batteryVoltage || 12.6,
-          ignitionState: (result.ignitionState || 'off') as any,
-          engineRunning: result.engineRunning || false,
-          diagnostics: result.diagnostics || null,
-          lastError: null,
-          lastActivity: Date.now(),
-          dmeProtocolVersion: result.dmeProtocolVersion || '',
-        });
-        this.lastHeartbeat = Date.now(); // Initialize heartbeat on connect
-        return true;
-      } else {
-        this.updateState({
-          connectionState: 'error',
-          lastError: result.error || 'Connection failed',
-        });
-        return false;
-      }
-    } catch (e: any) {
-      this.updateState({
-        connectionState: 'error',
-        lastError: 'Connection error: ' + (e?.message || String(e)),
-      });
-      return false;
-    }
-  }
-
-  disconnect(): void {
-    OBD2Bridge.disconnect().catch(() => {});
-    this.disableWatchdog(); // Stop watchdog on disconnect
-    this.updateState({
-      connectionState: 'disconnected',
-      cable: null,
-      protocol: 'none',
-      ecus: [],
-      batteryVoltage: 12.6,
-      ignitionState: 'off',
-      engineRunning: false,
-      vehicleSpeed: 0,
-      rpm: 0,
-      diagnostics: null,
-      lastError: null,
-      dmeProtocolVersion: '',
-    });
-    this.removeFlashListeners();
-  }
-
-  async readLiveData(): Promise<Record<string, number> | null> {
-    try {
-      const result = await OBD2Bridge.readLiveData();
-      if (result.connected) {
-        const data: Record<string, number> = {};
-        for (const [key, value] of Object.entries(result)) {
-          if (key !== 'connected' && key !== 'timestamp' && typeof value === 'number') {
-            data[key] = value;
-          }
-        }
-        this.updateState({ lastActivity: Date.now() });
-        this.heartbeat(); // Update watchdog heartbeat on successful read
-        return data;
-      }
-      return null;
-    } catch (e) {
-      return null;
-    }
-  }
-
-  async readPID(pid: string): Promise<number | null> {
-    try {
-      const result = await OBD2Bridge.readPID({ pid });
-      return result.value;
-    } catch (e) {
-      return null;
-    }
-  }
-
-  async readDMEInfo(): Promise<{ ecuType: string; software: string; vin: string; powerClass: string } | null> {
-    try {
-      const result = await OBD2Bridge.readDMEInfo();
-      if (result.success) {
-        return {
-          ecuType: result.ecuType,
-          software: result.software,
-          vin: result.vin,
-          powerClass: result.powerClass,
-        };
-      }
-      return null;
-    } catch (e) {
-      return null;
-    }
-  }
-
-  async writeDMEParameter(parameter: string, value: number): Promise<boolean> {
-    try {
-      const result = await OBD2Bridge.writeDMEParameter({ parameter, value });
-      return result.success;
-    } catch (e) {
-      return false;
-    }
-  }
-
-  async startFlash(isLiveFlash: boolean = false): Promise<{ success: boolean; message: string; session?: FlashSession }> {
-    if (this.state.connectionState !== 'connected') {
-      return { success: false, message: 'Not connected to vehicle' };
-    }
-    if (this.state.batteryVoltage < 13.0) {
-      return { success: false, message: `Battery voltage too low: ${this.state.batteryVoltage.toFixed(1)}V (need 13.0V+)` };
-    }
-    try {
-      const result = await OBD2Bridge.startFlash({ isLiveFlash });
-      if (result.success && result.session) {
-        const session: FlashSession = {
-          id: result.session.id,
-          startTime: result.session.startTime,
-          status: 'preparing',
-          progress: 0,
-          currentSector: 'Preparing...',
-          sectorsTotal: result.session.sectorsTotal,
-          sectorsComplete: 0,
-          bytesWritten: 0,
-          bytesTotal: result.session.bytesTotal,
-          speed: 0,
-          eta: result.session.eta,
-          errors: [],
-          isLiveFlash,
-          vehicleSpeed: this.state.vehicleSpeed,
-          batteryVoltage: this.state.batteryVoltage,
-        };
-        this.flashSession = session;
-        this.emitFlash();
-        this.setupFlashListeners();
-        return { success: true, message: result.message, session };
-      }
-      return { success: false, message: result.message };
-    } catch (e: any) {
-      return { success: false, message: 'Flash start failed: ' + (e?.message || String(e)) };
-    }
-  }
-
-  async executeFlash(): Promise<void> {
-    if (!this.flashSession) return;
-    try {
-      await OBD2Bridge.executeFlash();
-    } catch (e) {
-      if (this.flashSession) {
-        this.flashSession.status = 'error';
-        this.flashSession.currentSector = 'Flash error';
-        this.emitFlash();
-      }
-    }
-  }
-
-  async quickFlash(): Promise<{ success: boolean; message: string }> {
-    if (this.state.connectionState !== 'connected') {
-      return { success: false, message: 'Not connected' };
-    }
-    try {
-      const result = await OBD2Bridge.quickFlash();
-      return result;
-    } catch (e: any) {
-      return { success: false, message: 'Quick flash failed: ' + (e?.message || String(e)) };
-    }
-  }
-
-  abortFlash(): void {
-    OBD2Bridge.abortFlash().catch(() => {});
-    if (this.flashSession) {
-      this.flashSession.status = 'aborted';
-      this.flashSession.currentSector = 'Flash aborted by user';
-      this.emitFlash();
-    }
-  }
-
-  async sendCANCommands(commands: import('./nativeBridge').CANCommand[]): Promise<boolean> {
-    try {
-      const result = await OBD2Bridge.sendCANCommands({ commands });
-      return result.success;
-    } catch (e) {
-      return false;
-    }
-  }
-
-  // ==================== FLASH BACKUP / RESTORE ====================
-
-  async addBackupProgressListener(callback: (progress: { progress: number; currentSector: string }) => void): Promise<() => void> {
-    const listener = await OBD2Bridge.addListener('backupProgress', callback);
-    return () => listener.remove();
-  }
-
-  async backupDME(): Promise<{ success: boolean; backup?: import('@/types').FlashBackup; error?: string }> {
-    if (this.state.connectionState !== 'connected') {
-      return { success: false, error: 'Not connected to vehicle' };
-    }
-    try {
-      const result = await OBD2Bridge.backupDME();
-      return {
-        success: result.success,
-        backup: result.backup ? {
-          id: result.backup.id,
-          createdAt: result.backup.createdAt,
-          vin: result.backup.vin,
-          ecuType: result.backup.ecuType,
-          softwareVersion: result.backup.softwareVersion,
-          engineType: result.backup.engineType as any,
-          mapType: result.backup.mapType as any,
-          batteryVoltage: result.backup.batteryVoltage,
-          sectors: (result.backup.sectors || []).map((s: any) => ({
-            name: s.name,
-            startAddress: s.startAddress,
-            size: s.size,
-            checksum: s.checksum,
-            backedUp: s.backedUp,
-          })),
-          totalBytes: result.backup.totalBytes,
-          status: result.backup.status as any,
-          progress: result.backup.progress,
-        } : undefined,
-        error: result.error,
-      };
-    } catch (e: any) {
-      return { success: false, error: 'Backup failed: ' + (e?.message || String(e)) };
-    }
-  }
-
-  async restoreDME(backupId: string): Promise<{ success: boolean; sectorsRestored: number; sectorsTotal: number; error?: string }> {
-    if (this.state.connectionState !== 'connected') {
-      return { success: false, sectorsRestored: 0, sectorsTotal: 0, error: 'Not connected to vehicle' };
-    }
-    try {
-      const result = await OBD2Bridge.restoreDME({ backupId });
-      return {
-        success: result.success,
-        sectorsRestored: result.sectorsRestored,
-        sectorsTotal: result.sectorsTotal,
-        error: result.error,
-      };
-    } catch (e: any) {
-      return { success: false, sectorsRestored: 0, sectorsTotal: 0, error: 'Restore failed: ' + (e?.message || String(e)) };
-    }
-  }
-
-  // ==================== DIAGNOSTIC TROUBLE CODES ====================
-
-  async readDTCs(): Promise<import('@/types').DTCReading[]> {
-    if (this.state.connectionState !== 'connected') {
-      return [];
-    }
-    try {
-      const result = await OBD2Bridge.readDTCs();
-      return result.readings || [];
-    } catch (e) {
-      return [];
-    }
-  }
-
-  async clearDTCs(ecuAddress?: string): Promise<{ success: boolean; cleared: number }> {
-    if (this.state.connectionState !== 'connected') {
-      return { success: false, cleared: 0 };
-    }
-    try {
-      const result = await OBD2Bridge.clearDTCs({ ecuAddress });
-      return { success: result.success, cleared: result.cleared };
-    } catch (e) {
-      return { success: false, cleared: 0 };
-    }
-  }
-
-  // ==================== PRIVATE METHODS ====================
-
-  private setupFlashListeners() {
-    this.removeFlashListeners();
-    OBD2Bridge.addListener('flashProgress', (data: FlashProgressEvent) => {
-      if (!this.flashSession) return;
-      this.flashSession.progress = data.progress;
-      this.flashSession.currentSector = data.currentSector;
-      this.flashSession.sectorsComplete = data.sectorsComplete;
-      this.flashSession.sectorsTotal = data.sectorsTotal;
-      this.flashSession.speed = data.speed;
-      this.flashSession.eta = data.eta;
-      this.flashSession.status = 'flashing';
-      this.emitFlash();
-    }).then(l => { this.flashProgressListener = l; });
-    OBD2Bridge.addListener('flashComplete', () => {
-      if (!this.flashSession) return;
-      this.flashSession.status = 'complete';
-      this.flashSession.progress = 100;
-      this.flashSession.currentSector = 'Flash complete!';
-      this.flashSession.eta = 0;
-      this.emitFlash();
-      this.removeFlashListeners();
-    }).then(l => { this.flashCompleteListener = l; });
-    OBD2Bridge.addListener('flashError', (data: { status: string; error: string }) => {
-      if (!this.flashSession) return;
-      this.flashSession.status = 'error';
-      this.flashSession.currentSector = data.error;
-      this.flashSession.errors.push(data.error);
-      this.emitFlash();
-      this.removeFlashListeners();
-    }).then(l => { this.flashErrorListener = l; });
-  }
-
-  private removeFlashListeners() {
-    this.flashProgressListener?.remove();
-    this.flashCompleteListener?.remove();
-    this.flashErrorListener?.remove();
-    this.flashProgressListener = null;
-    this.flashCompleteListener = null;
-    this.flashErrorListener = null;
-  }
-
-  private updateState(partial: Partial<OBD2State>): void {
-    this.state = { ...this.state, ...partial };
-    this.emit();
   }
 }
 
 export const obd2Manager = new OBD2ConnectionManager();
+export default obd2Manager;
