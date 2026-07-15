@@ -10,6 +10,7 @@ import type {
 } from '@/types';
 import type { OBD2State, FlashSession, CableInfo } from '@/lib/obd2Connection';
 import { aiTuningEngine } from '@/lib/aiTuningEngine';
+import { geminiAiService, type AiChatMessage, type AiAnalysisResult } from '@/lib/geminiAiService';
 
 interface AppState {
   connection: ConnectionStatus;
@@ -55,7 +56,26 @@ interface AppState {
   aiRecommendations: AiTuneRecommendation[];
   setAiRecommendations: (r: AiTuneRecommendation[]) => void;
   refreshAiAnalysis: () => void;
+  refreshAiAnalysisAsync: () => Promise<void>;
   applyRecommendation: (id: string) => void;
+  // AI Gemini API State
+  aiApiAvailable: boolean | null;
+  setAiApiAvailable: (v: boolean | null) => void;
+  aiIsThinking: boolean;
+  setAiIsThinking: (v: boolean) => void;
+  aiSummary: string;
+  setAiSummary: (s: string) => void;
+  aiSafetyAssessment: string;
+  setAiSafetyAssessment: (s: string) => void;
+  aiEstimatedHpGain: number;
+  setAiEstimatedHpGain: (v: number) => void;
+  aiConfidence: number;
+  setAiConfidence: (v: number) => void;
+  aiChatHistory: AiChatMessage[];
+  setAiChatHistory: (h: AiChatMessage[]) => void;
+  aiLastError: string | null;
+  setAiLastError: (e: string | null) => void;
+  sendAiChat: (question: string) => Promise<void>;
   gaugeLayouts: GaugeLayout[];
   activeGaugeLayout: string;
   setActiveGaugeLayout: (id: string) => void;
@@ -275,10 +295,44 @@ export const useStore = create<AppState>((set, get) => ({
   },
   aiRecommendations: [],
   setAiRecommendations: (r) => set({ aiRecommendations: r }),
+  // AI: synchronous refresh (local rules + background Gemini)
   refreshAiAnalysis: () => {
     const { liveData, profile, currentMap } = get();
     if (!currentMap) return;
     set({ aiRecommendations: aiTuningEngine.analyzeLiveData(liveData, profile, currentMap) });
+  },
+  // AI: async refresh (Gemini API first, local fallback)
+  refreshAiAnalysisAsync: async () => {
+    const { liveData, profile, currentMap } = get();
+    if (!currentMap) return;
+    set({ aiIsThinking: true });
+    try {
+      const result = await geminiAiService.analyzeLiveData(liveData, profile, currentMap);
+      if (result) {
+        set({
+          aiRecommendations: result.recommendations,
+          aiSummary: result.summary,
+          aiSafetyAssessment: result.safetyAssessment,
+          aiEstimatedHpGain: result.estimatedHpGain,
+          aiConfidence: result.confidence,
+          aiApiAvailable: true,
+          aiIsThinking: false,
+        });
+      } else {
+        // Fall back to local
+        set({
+          aiRecommendations: aiTuningEngine.analyzeLiveData(liveData, profile, currentMap),
+          aiApiAvailable: false,
+          aiIsThinking: false,
+        });
+      }
+    } catch {
+      set({
+        aiRecommendations: aiTuningEngine.analyzeLiveData(liveData, profile, currentMap),
+        aiIsThinking: false,
+        aiApiAvailable: false,
+      });
+    }
   },
   applyRecommendation: (id) => {
     const { aiRecommendations, currentMap } = get();
@@ -289,6 +343,41 @@ export const useStore = create<AppState>((set, get) => ({
       updatedMap.timing = updatedMap.timing.map(t => ({ ...t, ignitionAdvance: rec.recommendedValue }));
     }
     set({ currentMap: updatedMap, aiRecommendations: aiRecommendations.filter(r => r.id !== id) });
+  },
+  // AI Gemini API State
+  aiApiAvailable: null,
+  setAiApiAvailable: (v) => set({ aiApiAvailable: v }),
+  aiIsThinking: false,
+  setAiIsThinking: (v) => set({ aiIsThinking: v }),
+  aiSummary: '',
+  setAiSummary: (s) => set({ aiSummary: s }),
+  aiSafetyAssessment: '',
+  setAiSafetyAssessment: (s) => set({ aiSafetyAssessment: s }),
+  aiEstimatedHpGain: 0,
+  setAiEstimatedHpGain: (v) => set({ aiEstimatedHpGain: v }),
+  aiConfidence: 0,
+  setAiConfidence: (v) => set({ aiConfidence: v }),
+  aiChatHistory: [],
+  setAiChatHistory: (h) => set({ aiChatHistory: h }),
+  aiLastError: null,
+  setAiLastError: (e) => set({ aiLastError: e }),
+  sendAiChat: async (question) => {
+    const { liveData, profile, currentMap } = get();
+    set({ aiIsThinking: true });
+    try {
+      const answer = await geminiAiService.chat(question, { data: liveData, profile, map: currentMap });
+      set({
+        aiChatHistory: [...get().aiChatHistory, { role: 'user', text: question, timestamp: Date.now() }, { role: 'model', text: answer, timestamp: Date.now() }],
+        aiIsThinking: false,
+        aiApiAvailable: true,
+      });
+    } catch (e) {
+      set({
+        aiChatHistory: [...get().aiChatHistory, { role: 'user', text: question, timestamp: Date.now() }, { role: 'model', text: `Error: ${(e as Error).message}`, timestamp: Date.now() }],
+        aiIsThinking: false,
+        aiApiAvailable: false,
+      });
+    }
   },
   gaugeLayouts: defaultGaugeLayouts,
   activeGaugeLayout: 'default',
@@ -309,10 +398,7 @@ export const useStore = create<AppState>((set, get) => ({
   setSelectedAdapterId: (id) => set({ selectedAdapterId: id }),
   adapterConfigs: defaultAdapterConfigs,
   updateAdapterConfig: (id, config) => set((s) => ({
-    adapterConfigs: {
-      ...s.adapterConfigs,
-      [id]: { ...s.adapterConfigs[id], ...config },
-    },
+    adapterConfigs: { ...s.adapterConfigs, [id]: { ...s.adapterConfigs[id], ...config } },
   })),
   showAdapterSettings: false,
   setShowAdapterSettings: (v) => set({ showAdapterSettings: v }),
