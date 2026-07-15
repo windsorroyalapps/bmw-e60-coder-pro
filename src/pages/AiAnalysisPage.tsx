@@ -4,8 +4,8 @@ import { geminiAiService } from '@/lib/geminiAiService';
 import {
   Brain, AlertTriangle, CheckCircle, Info, Zap, Fuel,
   Gauge, Settings, TrendingUp, Shield, Play, Sparkles,
-  Wifi, WifiOff, Loader, Send, MessageSquare, ChevronDown,
-  ChevronUp, RefreshCw, X, User, Bot
+  Wifi, WifiOff, Loader, Send, MessageSquare,
+  RefreshCw, X, User, Bot
 } from 'lucide-react';
 
 export const AiAnalysisPage: React.FC = () => {
