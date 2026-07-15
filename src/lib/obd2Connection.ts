@@ -3,24 +3,14 @@
 // No simulation, no mock data, no Math.random(). Real ECU communication only.
 
 import { OBD2Bridge } from './nativeBridge';
-import type {
-  FlashProgressEvent,
-} from './nativeBridge';
+import type { FlashProgressEvent, CableInfo } from './nativeBridge';
+
+// Re-export CableInfo from nativeBridge for consumers
+export type { CableInfo };
 
 export type ConnectionState = 'disconnected' | 'searching' | 'connecting' | 'handshaking' | 'connected' | 'error';
 export type CableType = 'k_dcan_ftdi' | 'k_dcan_ch340' | 'enet' | 'elm327_bt' | 'elm327_wifi' | 'unknown' | 'none';
 export type ProtocolType = 'k_line' | 'd_can' | 'k_dcan' | 'enet' | 'obd2' | 'none';
-
-export interface CableInfo {
-  type: CableType;
-  vendorId: string;
-  productId: string;
-  serialNumber: string;
-  driverVersion: string;
-  baudRate: number;
-  isGenuine: boolean;
-  detectedChip: 'FTDI_FT232R' | 'FTDI_FT232H' | 'CH340' | 'CH341' | 'CP2102' | 'unknown';
-}
 
 export interface ECUInfo {
   name: string;
@@ -130,9 +120,10 @@ export class OBD2ConnectionManager {
     try {
       const result = await OBD2Bridge.detectCable();
       if (result.found && result.cable) {
-        this.state.cable = result.cable;
+        const cable = result.cable as CableInfo;
+        this.state.cable = cable;
         this.emit();
-        return result.cable;
+        return cable;
       }
       return null;
     } catch {
@@ -151,9 +142,8 @@ export class OBD2ConnectionManager {
         this.state.connectionState = 'handshaking';
         this.emit();
 
-        // ECUs returned from connect
         if (result.ecus && result.ecus.length > 0) {
-          this.state.ecus = result.ecus as ECUInfo[];
+          this.state.ecus = result.ecus as unknown as ECUInfo[];
         }
         if (result.batteryVoltage) {
           this.state.batteryVoltage = result.batteryVoltage;
@@ -204,7 +194,6 @@ export class OBD2ConnectionManager {
       const data = await OBD2Bridge.readLiveData();
       if (data && data.connected !== false) {
         this.state.lastActivity = Date.now();
-        // Convert LiveDataResponse to Record<string, number>
         const numericData: Record<string, number> = {};
         for (const [key, value] of Object.entries(data)) {
           if (key !== 'connected' && key !== 'timestamp' && typeof value === 'number') {
@@ -223,7 +212,7 @@ export class OBD2ConnectionManager {
 
   // === Flash / Backup ===
   async addBackupProgressListener(callback: (event: FlashProgressEvent) => void): Promise<() => void> {
-    const handle = await OBD2Bridge.addListener('backupProgress', callback);
+    const handle = await OBD2Bridge.addListener('backupProgress', callback as any);
     return () => handle.remove();
   }
 
