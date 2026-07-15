@@ -1,12 +1,19 @@
+pluginManagement {
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+
+dependencyResolutionManagement {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
 include ':app'
-include ':capacitor-cordova-android-plugins'
-project(':capacitor-cordova-android-plugins').projectDir = new File('./capacitor-cordova-android-plugins/')
-
-// Android Auto car module - isolated to prevent androidx.car.app build issues
-// Uncomment the next two lines to enable Android Auto support.
-// NOTE: Requires androidx.car.app:app which may cause build issues on some
-// environments. Only enable after verifying the base APK build works.
-// include ':car'
-// project(':car').projectDir = new File('./car')
-
-apply from: 'capacitor.settings.gradle'
+include ':capacitor-android'
+project(':capacitor-android').projectDir = new File('../node_modules/@capacitor/android/capacitor')
+include ':car'
