@@ -3,8 +3,8 @@ import { useStore } from '@/hooks/useStore';
 import { obd2Manager } from '@/lib/obd2Connection';
 import {
   Usb, Search, Check, ChevronLeft, Settings2, Zap,
-  Shield, Gauge, Clock, Cable, Microchip, Activity,
-  Loader, AlertTriangle, CheckCircle2, X
+  Shield, Gauge, Clock, Cable, Cpu, Activity,
+  Loader, AlertTriangle, CheckCircle2
 } from 'lucide-react';
 import type { AdapterConfig } from '@/types';
 
@@ -380,7 +380,7 @@ export const OBDAdapterSettings: React.FC = () => {
                           <>
                             <div>
                               <label className="text-[10px] text-gray-500 flex items-center gap-1 mb-1">
-                                <Microchip className="w-3 h-3" /> Vendor ID
+                                <Cpu className="w-3 h-3" /> Vendor ID
                               </label>
                               <input
                                 type="text"
@@ -392,7 +392,7 @@ export const OBDAdapterSettings: React.FC = () => {
                             </div>
                             <div>
                               <label className="text-[10px] text-gray-500 flex items-center gap-1 mb-1">
-                                <Microchip className="w-3 h-3" /> Product ID
+                                <Cpu className="w-3 h-3" /> Product ID
                               </label>
                               <input
                                 type="text"
