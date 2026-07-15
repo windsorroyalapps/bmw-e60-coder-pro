@@ -320,3 +320,24 @@ export interface DTCReading {
     count?: number;
   }[];
 }
+
+// ============================================================================
+// OBD Adapter Configuration
+// ============================================================================
+
+export interface AdapterConfig {
+  id: string;
+  name: string;
+  chip: string;
+  vid: string;
+  pid: string;
+  type: 'k_dcan_ftdi' | 'k_dcan_ch340' | 'enet';
+  isGenuine: boolean;
+  baudRate: number;
+  ftdiLatencyTimer: number;     // 1-16ms
+  dtrRtsMode: 'kline' | 'dcan' | 'none';
+  protocolPreference: 'auto' | 'kline' | 'dcan';
+  connectTimeout: number;       // ms
+  testerPresentInterval: number; // ms
+  description: string;
+}
