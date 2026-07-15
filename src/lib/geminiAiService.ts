@@ -1,7 +1,7 @@
 // BMW E60 Coder Pro - Google Gemini AI Service
 // Set your API key in a .env file: VITE_GEMINI_API_KEY=your_key_here
 
-import type { VehicleProfile, PerformanceMap, AiTuneRecommendation } from '@/types';
+import type { PerformanceMap, AiTuneRecommendation } from '@/types';
 
 function getApiKey(): string {
   const env = (import.meta as any).env;
@@ -12,6 +12,21 @@ function getApiKey(): string {
 
 const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 const MODEL_NAME = 'models/gemini-2.0-flash';
+
+// Loose profile interface - only includes fields actually used by this service
+// This avoids type mismatch with the store's TuningProfile which has fewer fields
+interface ProfileLike {
+  engine: string;
+  currentMap: string;
+  hasUpgradedIntercooler?: boolean;
+  hasUpgradedTurbo?: boolean;
+  hasUpgradedFuelPump?: boolean;
+  hasUpgradedClutch?: boolean;
+  hasMethInjection?: boolean;
+  hasDownpipes?: boolean;
+  hasExhaust?: boolean;
+  hasUpgradedChargepipe?: boolean;
+}
 
 export interface AiAnalysisResult {
   summary: string;
@@ -129,7 +144,7 @@ function convertLiveData(data: any): Record<string, number> {
   };
 }
 
-function buildModifications(profile: VehicleProfile): string[] {
+function buildModifications(profile: ProfileLike): string[] {
   const mods: string[] = [];
   if (profile.hasUpgradedIntercooler) mods.push('Upgraded Intercooler');
   if (profile.hasUpgradedTurbo) mods.push('Upgraded Turbo(s)');
@@ -154,7 +169,7 @@ function inferRecommendationType(parameter: string): AiTuneRecommendation['type'
 }
 
 export const geminiAiService = {
-  async analyzeLiveData(data: any, profile: VehicleProfile, _currentMap: PerformanceMap | null): Promise<{ recommendations: AiTuneRecommendation[] }> {
+  async analyzeLiveData(data: any, profile: ProfileLike, _currentMap: PerformanceMap | null): Promise<{ recommendations: AiTuneRecommendation[] }> {
     const liveData = convertLiveData(data);
     const result = await analyzeLiveData(liveData, profile.engine, profile.currentMap, buildModifications(profile));
     const recommendations: AiTuneRecommendation[] = result.recommendations.map(r => ({
@@ -172,7 +187,7 @@ export const geminiAiService = {
     return { recommendations };
   },
 
-  analyzeLiveDataLocal(data: any, profile: VehicleProfile, _currentMap: PerformanceMap | null): { recommendations: AiTuneRecommendation[] } {
+  analyzeLiveDataLocal(data: any, profile: ProfileLike, _currentMap: PerformanceMap | null): { recommendations: AiTuneRecommendation[] } {
     const liveData = convertLiveData(data);
     const result = localFallbackAnalysis(liveData, profile.engine);
     const recommendations: AiTuneRecommendation[] = result.recommendations.map(r => ({
