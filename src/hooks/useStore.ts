@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { TuningProfile, EngineType, OBD2Data, LogEntry, FlashBackup, LogSession, GaugeLayout } from '@/types';
+import type { TuningProfile, EngineType, LiveData, LogEntry, FlashBackup, LogSession, GaugeLayout } from '@/types';
 import type { OBD2State, CableInfo, FlashSession } from '@/lib/obd2Connection';
 import { aiTuningEngine } from '@/lib/aiTuningEngine';
 import type { AdapterConfig } from '@/components/OBDAdapterSettings';
@@ -22,8 +22,8 @@ interface AppState {
   setProfile: (profile: TuningProfile) => void;
 
   // Live Data
-  liveData: OBD2Data;
-  updateLiveData: (data: Partial<OBD2Data>) => void;
+  liveData: LiveData;
+  updateLiveData: (data: Partial<LiveData>) => void;
 
   // Logging
   isLogging: boolean;
@@ -53,8 +53,8 @@ interface AppState {
   setActiveGaugeLayout: (id: string) => void;
 
   // AI Tuning
-  aiRecommendations: ReturnType<typeof aiTuningEngine.analyze>;
-  setAiRecommendations: (recs: ReturnType<typeof aiTuningEngine.analyze>) => void;
+  aiRecommendations: any[];
+  setAiRecommendations: (recs: any[]) => void;
   aiChatOpen: boolean;
   setAiChatOpen: (open: boolean) => void;
 
@@ -175,20 +175,30 @@ export const useStore = create<AppState>((set, get) => ({
   // Live Data
   liveData: {
     rpm: 0,
-    boost: 0,
-    afr: 14.7,
-    iat: 25,
+    speed: 0,
     coolantTemp: 90,
     oilTemp: 95,
-    timing: 0,
-    knock: 0,
-    load: 0,
+    oilPressure: 0,
+    boost: 0,
+    iat: 25,
+    afr: 14.7,
     throttle: 0,
+    load: 0,
+    timing: 0,
+    fuelPressure: 0,
+    battery: 12.6,
+    knock: 0,
+    lambda: 1.0,
+    mapPressure: 0,
+    maf: 0,
     fuelTrimShort: 0,
     fuelTrimLong: 0,
     dutyCycle: 0,
-    oilPressure: 0,
-    batteryVoltage: 12.6,
+    tqActual: 0,
+    tqRequested: 0,
+    turbineInlet: 0,
+    turbineOutlet: 0,
+    timestamp: Date.now(),
   },
   updateLiveData: (data) => set((s) => ({ liveData: { ...s.liveData, ...data } })),
 
@@ -247,7 +257,7 @@ export const useStore = create<AppState>((set, get) => ({
   setActiveGaugeLayout: (id) => set({ activeGaugeLayout: id }),
 
   // AI Tuning
-  aiRecommendations: aiTuningEngine.analyze({}, {
+  aiRecommendations: aiTuningEngine.analyzeLiveData({} as any, {
     engine: 'n54',
     currentMap: 'stock',
     hasUpgradedIntercooler: false,
@@ -256,7 +266,7 @@ export const useStore = create<AppState>((set, get) => ({
     hasDownpipes: false,
     hasExhaust: false,
     hasMethInjection: false,
-  } as TuningProfile),
+  } as any, null),
   setAiRecommendations: (recs) => set({ aiRecommendations: recs }),
   aiChatOpen: false,
   setAiChatOpen: (open) => set({ aiChatOpen: open }),
