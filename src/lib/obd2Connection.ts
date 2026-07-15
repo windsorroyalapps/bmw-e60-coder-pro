@@ -4,7 +4,6 @@
 
 import { OBD2Bridge } from './nativeBridge';
 import type {
-  ConnectionDiagnostics,
   FlashProgressEvent,
 } from './nativeBridge';
 
@@ -32,8 +31,6 @@ export interface ECUInfo {
   lastResponse: number;
   faultCodes: number;
 }
-
-export { ConnectionDiagnostics };
 
 export interface FlashSession {
   id: string;
@@ -63,7 +60,7 @@ export interface OBD2State {
   engineRunning: boolean;
   vehicleSpeed: number;
   rpm: number;
-  diagnostics: ConnectionDiagnostics | null;
+  diagnostics: any | null;
   lastError: string | null;
   lastActivity: number;
   autoConnect: boolean;
@@ -91,15 +88,11 @@ export class OBD2ConnectionManager {
   private listeners: ((state: OBD2State) => void)[] = [];
   private flashListeners: ((session: FlashSession) => void)[] = [];
   private flashSession: FlashSession | null = null;
-  private flashProgressListener: { remove: () => void } | null = null;
-  private flashCompleteListener: { remove: () => void } | null = null;
-  private flashErrorListener: { remove: () => void } | null = null;
 
   // Connection watchdog
   private watchdogTimer: ReturnType<typeof setInterval> | null = null;
   private lastHeartbeat: number = 0;
-  private watchdogEnabled: boolean = false;
-  private heartbeatTimeoutMs: number = 500; // 500ms disconnect detection
+  private heartbeatTimeoutMs: number = 500;
   private onConnectionDeadCallback: (() => void) | null = null;
 
   subscribe(callback: (state: OBD2State) => void) {
@@ -135,12 +128,13 @@ export class OBD2ConnectionManager {
   // === Cable Detection ===
   async detectCable(): Promise<CableInfo | null> {
     try {
-      const info = await OBD2Bridge.detectCable();
-      if (info) {
-        this.state.cable = info;
+      const result = await OBD2Bridge.detectCable();
+      if (result.found && result.cable) {
+        this.state.cable = result.cable;
         this.emit();
+        return result.cable;
       }
-      return info;
+      return null;
     } catch {
       return null;
     }
@@ -152,14 +146,22 @@ export class OBD2ConnectionManager {
     this.emit();
 
     try {
-      await OBD2Bridge.connect();
-      this.state.connectionState = 'handshaking';
-      this.emit();
+      const result = await OBD2Bridge.connect();
+      if (result.success) {
+        this.state.connectionState = 'handshaking';
+        this.emit();
 
-      // After connect, query ECUs
-      const ecus = await OBD2Bridge.queryECUs();
-      if (ecus && ecus.length > 0) {
-        this.state.ecus = ecus;
+        // ECUs returned from connect
+        if (result.ecus && result.ecus.length > 0) {
+          this.state.ecus = result.ecus as ECUInfo[];
+        }
+        if (result.batteryVoltage) {
+          this.state.batteryVoltage = result.batteryVoltage;
+        }
+        if (result.protocol) {
+          this.state.protocol = result.protocol as ProtocolType;
+        }
+
         this.state.connectionState = 'connected';
         this.state.lastActivity = Date.now();
         this.emit();
@@ -167,7 +169,7 @@ export class OBD2ConnectionManager {
         return true;
       } else {
         this.state.connectionState = 'error';
-        this.state.lastError = 'No ECUs responded to query';
+        this.state.lastError = result.error || 'Connection failed';
         this.emit();
         return false;
       }
@@ -200,12 +202,20 @@ export class OBD2ConnectionManager {
   async readLiveData(): Promise<Record<string, number> | null> {
     try {
       const data = await OBD2Bridge.readLiveData();
-      if (data) {
+      if (data && data.connected !== false) {
         this.state.lastActivity = Date.now();
-        if (data.batteryVoltage) this.state.batteryVoltage = data.batteryVoltage;
-        if (data.rpm) this.state.rpm = data.rpm;
+        // Convert LiveDataResponse to Record<string, number>
+        const numericData: Record<string, number> = {};
+        for (const [key, value] of Object.entries(data)) {
+          if (key !== 'connected' && key !== 'timestamp' && typeof value === 'number') {
+            numericData[key] = value;
+          }
+        }
+        if (numericData.battery) this.state.batteryVoltage = numericData.battery;
+        if (numericData.rpm) this.state.rpm = numericData.rpm;
+        return numericData;
       }
-      return data;
+      return null;
     } catch {
       return null;
     }
@@ -213,7 +223,8 @@ export class OBD2ConnectionManager {
 
   // === Flash / Backup ===
   async addBackupProgressListener(callback: (event: FlashProgressEvent) => void): Promise<() => void> {
-    return OBD2Bridge.addBackupProgressListener(callback);
+    const handle = await OBD2Bridge.addListener('backupProgress', callback);
+    return () => handle.remove();
   }
 
   async backupDME(): Promise<{ success: boolean; backup?: any; error?: string }> {
@@ -226,7 +237,7 @@ export class OBD2ConnectionManager {
 
   async restoreDME(backupId: string): Promise<{ success: boolean; error?: string }> {
     try {
-      return await OBD2Bridge.restoreDME(backupId);
+      return await OBD2Bridge.restoreDME({ backupId });
     } catch (err: any) {
       return { success: false, error: err?.message };
     }
@@ -234,7 +245,11 @@ export class OBD2ConnectionManager {
 
   async readDMEInfo(): Promise<{ vin: string; ecuType: string; software: string } | null> {
     try {
-      return await OBD2Bridge.readDMEInfo();
+      const result = await OBD2Bridge.readDMEInfo();
+      if (result.success) {
+        return { vin: result.vin, ecuType: result.ecuType, software: result.software };
+      }
+      return null;
     } catch {
       return null;
     }
@@ -242,12 +257,12 @@ export class OBD2ConnectionManager {
 
   async startFlash(isLive: boolean): Promise<{ success: boolean; session?: FlashSession }> {
     try {
-      const result = await OBD2Bridge.startFlash(isLive);
-      if (result.session) {
-        this.flashSession = result.session;
+      const result = await OBD2Bridge.startFlash({ isLiveFlash: isLive });
+      if (result.success && result.session) {
+        this.flashSession = result.session as unknown as FlashSession;
         this.emitFlash();
       }
-      return result;
+      return { success: result.success, session: this.flashSession || undefined };
     } catch (err: any) {
       return { success: false };
     }
@@ -267,14 +282,12 @@ export class OBD2ConnectionManager {
 
   // === Watchdog ===
   enableWatchdog(timeoutMs: number = 500, onDead: () => void) {
-    this.watchdogEnabled = true;
     this.heartbeatTimeoutMs = timeoutMs;
     this.onConnectionDeadCallback = onDead;
     this.startWatchdog();
   }
 
   disableWatchdog() {
-    this.watchdogEnabled = false;
     this.onConnectionDeadCallback = null;
     this.stopWatchdog();
   }
