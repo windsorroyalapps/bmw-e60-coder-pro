@@ -231,24 +231,43 @@ export interface AiTuneRecommendation {
   autoApplicable: boolean;
 }
 
-export interface VehicleProfile {
-  id: string;
-  name: string;
-  vin: string;
+// Lightweight tuning profile used by the store - only essential fields
+export interface TuningProfile {
+  year?: string;
   engine: EngineType;
-  transmission: TransmissionType;
-  injector: InjectorType;
-  hasUpgradedIntercooler: boolean;
-  hasUpgradedTurbo: boolean;
-  hasUpgradedFuelPump: boolean;
-  hasUpgradedClutch: boolean;
-  hasMethInjection: boolean;
-  hasDownpipes: boolean;
-  hasExhaust: boolean;
-  hasUpgradedChargepipe: boolean;
-  currentMap: MapType;
-  mileage: number;
-  notes: string;
+  currentMap: string;
+  transmission?: string;
+  fuelOctane?: number;
+  hasUpgradedIntercooler?: boolean;
+  hasUpgradedTurbo?: boolean;
+  hasUpgradedFuelPump?: boolean;
+  hasUpgradedClutch?: boolean;
+  hasMethInjection?: boolean;
+  hasDownpipes?: boolean;
+  hasExhaust?: boolean;
+  hasUpgradedChargepipe?: boolean;
+}
+
+// Full vehicle profile with all details - extends TuningProfile
+// Most fields are optional so TuningProfile can be passed where VehicleProfile is expected
+export interface VehicleProfile {
+  id?: string;
+  name?: string;
+  vin?: string;
+  engine: EngineType;
+  transmission?: TransmissionType;
+  injector?: InjectorType;
+  hasUpgradedIntercooler?: boolean;
+  hasUpgradedTurbo?: boolean;
+  hasUpgradedFuelPump?: boolean;
+  hasUpgradedClutch?: boolean;
+  hasMethInjection?: boolean;
+  hasDownpipes?: boolean;
+  hasExhaust?: boolean;
+  hasUpgradedChargepipe?: boolean;
+  currentMap: MapType | string;
+  mileage?: number;
+  notes?: string;
 }
 
 export interface ConnectionStatus {
