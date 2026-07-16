@@ -10,7 +10,7 @@ import androidx.car.app.validation.HostValidator;
 import androidx.annotation.NonNull;
 
 /**
- * BMW E60 Coder Pro - Android Auto Host Service (Grok patched)
+ * BMW E60 Coder Pro - Android Auto Host Service (Grok patched - fixed types)
  */
 public class BMWCoderProCarAppService extends CarAppService {
 
@@ -21,7 +21,7 @@ public class BMWCoderProCarAppService extends CarAppService {
             return HostValidator.ALLOW_ALL_HOSTS_VALIDATOR;
         }
         return new HostValidator.Builder(getApplicationContext())
-                .addAllowedHosts(new String[]{"*"})
+                .addAllowedHosts(R.array.hosts_allowlist_sample_app) // Use proper resource or define one
                 .build();
     }
 
