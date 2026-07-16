@@ -10,8 +10,7 @@ import androidx.car.app.validation.HostValidator;
 import androidx.annotation.NonNull;
 
 /**
- * BMW E60 Coder Pro - Android Auto Host Service
- * Provides gauge data and tuning status to the car's head unit display.
+ * BMW E60 Coder Pro - Android Auto Host Service (Grok patched)
  */
 public class BMWCoderProCarAppService extends CarAppService {
 
@@ -22,7 +21,7 @@ public class BMWCoderProCarAppService extends CarAppService {
             return HostValidator.ALLOW_ALL_HOSTS_VALIDATOR;
         }
         return new HostValidator.Builder(getApplicationContext())
-                .addAllowedHosts(androidx.car.app.R.array.hosts_allowlist_sample_app)
+                .addAllowedHosts(new String[]{"*"})
                 .build();
     }
 
@@ -36,15 +35,5 @@ public class BMWCoderProCarAppService extends CarAppService {
                 return new CarAppActivity(getCarContext());
             }
         };
-    }
-
-    @Override
-    public void onCreate() {
-        super.onCreate();
-    }
-
-    @Override
-    public void onDestroy() {
-        super.onDestroy();
     }
 }
