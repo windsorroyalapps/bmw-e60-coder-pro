@@ -4,6 +4,7 @@
     <uses-feature android:name="android.hardware.usb.host" android:required="false" />
     <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
     <uses-feature android:name="android.hardware.gamepad" android:required="false" />
+    <uses-feature android:name="android.hardware.nfc.hce" android:required="true" />
 
     <application
         android:allowBackup="true"
@@ -15,6 +16,19 @@
         android:usesCleartextTraffic="true"
         android:requestLegacyExternalStorage="true"
         android:hardwareAccelerated="true">
+
+        <service
+            android:name=".nfc.FuelPaymentService"
+            android:exported="true"
+            android:permission="android.permission.BIND_NFC_SERVICE">
+            <intent-filter>
+                <action android:name="android.nfc.cardemulation.action.HOST_APDU_SERVICE" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <meta-data
+                android:name="android.nfc.cardemulation.host_apdu_service"
+                android:resource="@xml/apduservice" />
+        </service>
 
         <activity
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation"
@@ -79,5 +93,9 @@
 
     <!-- Modify Audio Settings (for audio control) -->
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+
+    <!-- NFC -->
+    <uses-permission android:name="android.permission.NFC" />
+    <uses-permission android:name="android.permission.NFC_PREFERRED_PAYMENT_INFO" />
 
 </manifest>

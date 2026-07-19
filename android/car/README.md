@@ -1,27 +1,30 @@
 # BMW E60 Coder Pro - Android Auto Module
 
-This module provides Android Auto integration for the BMW E60 Coder Pro app.
+This module provides Android Auto integration for the BMW E60 Coder Pro app, allowing drivers to view critical vehicle data directly on their car's head unit.
 
 ## Features
 
-- Live OBD2 gauge display on car head unit
-- RPM, Boost, AFR, IAT readouts
-- Connection status indicator
+- **Live OBD2 Gauges**: Real-time display of RPM, Boost, AFR, and IAT.
+- **Connection Status**: Visual indicator of OBD2 and controller connectivity.
+- **Debug Mode**: Host validation is currently set to `ALLOW_ALL_HOSTS_VALIDATOR` for easier testing on non-production head units.
 
-## Setup
+## Technical Details
 
-1. The car module is included as a Gradle subproject in `android/settings.gradle`
-2. Build with: `./gradlew :car:build`
-3. The app service is declared in `AndroidManifest.xml`
+- **Java Version**: Standardized to Java 17 for compatibility with the project's build environment.
+- **Library**: Uses `androidx.car.app:app:1.4.0`.
+- **Service**: `BMWCoderProCarAppService` manages the lifecycle and screen transitions.
+- **Entry Point**: `CarAppActivity` serves as the primary dashboard.
 
-## Architecture
+## Build & Deployment
 
-- `BMWCoderProCarAppService` - Main CarAppService host
-- `CarAppActivity` - Main screen with gauge grid
-- Uses AndroidX Car App library v1.4.0
+The car module is a Gradle subproject. To build it independently:
+```bash
+cd android
+./gradlew.bat :car:assembleDebug
+```
 
 ## Requirements
 
-- Android Auto compatible head unit
-- USB connection to vehicle
-- Android 8.0+ (API 26+)
+- Android Auto compatible head unit or DHU (Desktop Head Unit).
+- Minimum API Level 26 (Android 8.0).
+- The `:app` module must be installed on the same device to provide the data bridge.

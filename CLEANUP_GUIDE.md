@@ -314,11 +314,11 @@ Before releasing:
 
 ## Environment Requirements
 
-- **Node.js**: 16+
-- **npm**: 7+
-- **Java**: 11+ (for Gradle)
-- **Android SDK**: API level 35 (min: 23)
-- **Android Studio**: Recommended for testing
+- **Node.js**: 18+
+- **npm**: 9+
+- **Java**: 17 (Required for all modules)
+- **Android SDK**: API level 35 (min: 26)
+- **Android Studio**: Ladybug or newer recommended
 
 ---
 

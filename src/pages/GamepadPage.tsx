@@ -3,12 +3,13 @@ import { useStore } from '@/hooks/useStore';
 import { gamepadManager } from '@/lib/gamepadManager';
 import { VO_OPTIONS, CATEGORIES, validateVOCombination } from '@/lib/voEditor';
 import type { GamepadState, GamepadAxes } from '@/lib/gamepadManager';
+import { GamepadMappingModal } from '@/components/GamepadMappingModal';
 import {
   Gamepad2, AlertTriangle, CheckCircle, Shield, ShieldAlert,
   Settings, Zap, Navigation, Car,
   Info, Lock, Unlock, Siren,
   X, RotateCcw, Cog, Lightbulb, Monitor, Armchair,
-  Check
+  Check, Bluetooth, Usb, Sliders
 } from 'lucide-react';
 
 const CAT_ICONS: Record<string, React.ElementType> = {
@@ -87,6 +88,7 @@ export const GamepadPage: React.FC = () => {
   const [gpState, setGpState] = useState<GamepadState>(gamepadManager.getState());
   const [activeTab, setActiveTab] = useState<'drive' | 'vo'>('drive');
   const [safetyDialog, setSafetyDialog] = useState(false);
+  const [mappingModalOpen, setMappingModalOpen] = useState(false);
   const [safetyChecks, setSafetyChecks] = useState({ handbrake: false, offroad: false, emergency: false, understand: false });
   const [voEnabled, setVoEnabled] = useState<string[]>(['1CA', '205', '4A4']);
   const [voWarnings, setVoWarnings] = useState<string[]>([]);
@@ -189,13 +191,33 @@ export const GamepadPage: React.FC = () => {
             <div className="space-y-3">
               {/* Connection */}
               <div className="bg-[#0d1117] rounded-xl p-3 border border-gray-800">
-                <div className="text-xs text-gray-500 mb-2">Controller Status</div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="text-xs text-gray-500">Controller Status</div>
+                  {gpState.connected && (
+                    <div className="flex items-center gap-1">
+                      {gpState.controllerName.toLowerCase().includes('wireless') || gpState.controllerName.toLowerCase().includes('bluetooth') ? (
+                        <Bluetooth className="w-3 h-3 text-blue-400" />
+                      ) : (
+                        <Usb className="w-3 h-3 text-gray-400" />
+                      )}
+                      <span className="text-[10px] text-gray-500 uppercase">{gpState.controllerType}</span>
+                    </div>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 mb-3">
                   <div className={`w-3 h-3 rounded-full ${gpState.connected ? 'bg-green-400' : 'bg-red-400'}`} />
-                  <span className={`text-sm ${gpState.connected ? 'text-green-400' : 'text-red-400'}`}>
-                    {gpState.connected ? 'Xbox Controller Connected' : 'No Controller Found'}
+                  <span className={`text-sm font-medium ${gpState.connected ? 'text-green-400' : 'text-red-400'}`}>
+                    {gpState.connected ? gpState.controllerName : 'No Controller Found'}
                   </span>
                 </div>
+
+                <button
+                  onClick={() => setMappingModalOpen(true)}
+                  className="w-full flex items-center justify-center gap-2 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs rounded-lg transition-colors border border-gray-700"
+                >
+                  <Sliders className="w-3.5 h-3.5" />
+                  Custom Key Bindings
+                </button>
               </div>
 
               {/* Drive Controls */}
@@ -457,7 +479,7 @@ export const GamepadPage: React.FC = () => {
                 <h2 className="text-lg font-bold text-white">Safety Checklist</h2>
               </div>
               <p className="text-xs text-red-300 mt-1">
-                Controller drive mode is for OFF-ROAD / CLOSED COURSE use only. 
+                Controller drive mode is for OFF-ROAD / CLOSED COURSE use only.
                 Confirm all safety items before proceeding.
               </p>
             </div>
@@ -481,7 +503,7 @@ export const GamepadPage: React.FC = () => {
                 className={`w-full flex items-center gap-3 p-3 rounded-lg border text-left transition-all ${safetyChecks.emergency ? 'border-green-500/30 bg-green-500/10' : 'border-gray-700 bg-gray-800/50'}`}
               >
                 {safetyChecks.emergency ? <CheckCircle className="w-5 h-5 text-green-400 flex-shrink-0" /> : <div className="w-5 h-5 rounded border border-gray-600 flex-shrink-0" />}
-                <span className="text-sm text-white">I know the Xbox button is EMERGENCY STOP</span>
+                <span className="text-sm text-white">I know the Xbox/PS button is EMERGENCY STOP</span>
               </button>
               <button
                 onClick={() => setSafetyChecks(p => ({ ...p, understand: !p.understand }))}
@@ -505,6 +527,11 @@ export const GamepadPage: React.FC = () => {
           </div>
         </div>
       )}
+
+      <GamepadMappingModal
+        isOpen={mappingModalOpen}
+        onClose={() => setMappingModalOpen(false)}
+      />
     </div>
   );
 };

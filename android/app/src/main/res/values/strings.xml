@@ -4,4 +4,6 @@
     <string name="title_activity_main">BMW E60 Coder Pro</string>
     <string name="package_name">com.bmwe60.coderpro</string>
     <string name="custom_url_scheme">com.bmwe60.coderpro</string>
+    <string name="servicedesc">BMW E60 Fuel Payment Service</string>
+    <string name="paymentdesc">Fuel Payment Card</string>
 </resources>

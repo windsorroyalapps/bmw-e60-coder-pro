@@ -6,7 +6,10 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "cap:sync": "npx cap sync android",
+    "android:build": "npm run build && npm run cap:sync && cd android && ./gradlew.bat assembleDebug",
+    "android:test": "cd android && ./gradlew.bat testDebugUnitTest"
   },
   "dependencies": {
     "react": "^18.2.0",

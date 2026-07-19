@@ -1,15 +1,32 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useStore } from '@/hooks/useStore';
 import { ENGINE_SPECS } from '@/lib/engineData';
 import {
   Settings, Car, Cpu, Save,
-  CheckCircle, Gauge, Zap
+  CheckCircle, Gauge, Zap, CreditCard, Nfc, AlertCircle
 } from 'lucide-react';
 import type { EngineType, TransmissionType } from '@/types';
 
 export const SettingsPage: React.FC = () => {
-  const { profile, updateProfile } = useStore();
+  const { profile, updateProfile, fuelCard, setFuelCard } = useStore();
   const [saved, setSaved] = useState(false);
+  const [isProvisioning, setIsProvisioning] = useState(false);
+  const [lastTx, setLastTx] = useState<{ amount: number; timestamp: number } | null>(null);
+
+  useEffect(() => {
+    const handleFuelTx = (event: any) => {
+      console.log("Fuel Transaction Event:", event);
+      // Capacitor events usually come through as a custom event or window property
+      const data = typeof event.detail === 'string' ? JSON.parse(event.detail) : event.detail;
+      setLastTx(data);
+
+      // Auto-clear after 10 seconds
+      setTimeout(() => setLastTx(null), 10000);
+    };
+
+    window.addEventListener('fuelTransactionVerified', handleFuelTx);
+    return () => window.removeEventListener('fuelTransactionVerified', handleFuelTx);
+  }, []);
 
   const engines: { id: EngineType; name: string }[] = [
     { id: 'n54', name: 'N54 (Twin-Turbo)' },
@@ -173,6 +190,85 @@ export const SettingsPage: React.FC = () => {
                 </div>
               </button>
             ))}
+          </div>
+        </div>
+
+        {/* NFC Fuel Payment */}
+        <div className="bg-[#0d1117] rounded-xl p-4 border border-gray-800">
+          <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3 flex items-center gap-2">
+            <CreditCard className="w-4 h-4" />
+            Fuel Payment (NFC)
+          </h2>
+          <div className={`p-4 rounded-lg border mb-3 text-center transition-all ${
+            lastTx ? 'bg-amber-500/10 border-amber-500/50 scale-105' :
+            fuelCard.enabled ? 'bg-green-500/5 border-green-500/20' : 'bg-blue-500/5 border-blue-500/20'
+          }`}>
+            {lastTx ? (
+              <div className="animate-pulse">
+                <AlertCircle className="w-12 h-12 text-amber-400 mx-auto mb-2" />
+                <div className="text-white font-bold text-lg mb-1">Pre-Auth Verified</div>
+                <div className="text-2xl font-mono text-amber-500 mb-1">${lastTx.amount.toFixed(2)}</div>
+                <div className="text-xs text-gray-400">Pump Authorization Successful</div>
+              </div>
+            ) : (
+              <>
+                <Nfc className={`w-12 h-12 mx-auto mb-2 ${fuelCard.enabled ? 'text-green-400' : 'text-blue-400'}`} />
+                <div className="text-white font-bold text-lg mb-1">
+                  {fuelCard.enabled ? `Fuel Card Active` : 'Fuel Card Inactive'}
+                </div>
+                {fuelCard.enabled && (
+                  <div className="text-xs text-green-500 font-mono mb-1">
+                    **** **** **** {fuelCard.lastFour}
+                  </div>
+                )}
+                <div className="text-xs text-gray-500">
+                  {fuelCard.enabled
+                    ? 'Ready to tap at any BP, Ampol, or Shell pump'
+                    : 'Tap to pay at gas pumps for auto-log integration'}
+                </div>
+              </>
+            )}
+          </div>
+          <button
+            disabled={isProvisioning}
+            className={`w-full py-2.5 text-white text-sm font-medium rounded-lg transition-all flex items-center justify-center gap-2 ${
+              isProvisioning ? 'bg-gray-700' : 'bg-blue-600 hover:bg-blue-700'
+            }`}
+            onClick={async () => {
+              setIsProvisioning(true);
+              try {
+                // @ts-ignore
+                const result = await window.Capacitor.Plugins.OBD2Bridge.provisionFuelCard({
+                  token: "" // Pass empty to trigger rolling PAN generation
+                });
+
+                if (result.success) {
+                  setFuelCard({
+                    enabled: true,
+                    token: result.token,
+                    lastFour: result.token.slice(-4)
+                  });
+                  alert(`Fuel Card Provisioned! Rolling PAN: ****${result.token.slice(-4)}`);
+                }
+              } catch (e) {
+                alert("Provisioning failed: " + e);
+              } finally {
+                setIsProvisioning(false);
+              }
+            }}
+          >
+            {isProvisioning ? (
+              <>
+                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                Provisioning...
+              </>
+            ) : (
+              fuelCard.enabled ? 'Rotate Rolling PAN' : 'Provision Fuel Card'
+            )}
+          </button>
+          <div className="mt-3 flex items-center gap-2 text-[10px] text-gray-500">
+            <CheckCircle className={`w-3 h-3 ${fuelCard.enabled ? 'text-green-500' : 'text-gray-600'}`} />
+            Supports Visa/MasterCard Contactless (HCE) with Luhn validation
           </div>
         </div>
 

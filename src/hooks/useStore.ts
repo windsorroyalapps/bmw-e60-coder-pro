@@ -98,6 +98,14 @@ interface AppState {
   setShowAdapterSettings: (v: boolean) => void;
   setSelectedAdapterId: (id: string | null) => void;
   updateAdapterConfig: (id: string, config: Partial<AdapterConfig>) => void;
+
+  // NFC Fuel Card
+  fuelCard: {
+    enabled: boolean;
+    lastFour: string;
+    token: string | null;
+  };
+  setFuelCard: (card: Partial<AppState['fuelCard']>) => void;
 }
 
 const DEFAULT_GAUGE_LAYOUTS: GaugeLayout[] = [
@@ -375,6 +383,14 @@ export const useStore = create<AppState>((set, get) => ({
   updateAdapterConfig: (id, config) => set((s) => ({
     adapterConfigs: { ...s.adapterConfigs, [id]: { ...s.adapterConfigs[id], ...config } },
   })),
+
+  // NFC Fuel Card
+  fuelCard: {
+    enabled: false,
+    lastFour: '',
+    token: null,
+  },
+  setFuelCard: (card) => set((s) => ({ fuelCard: { ...s.fuelCard, ...card } })),
 }));
 
 // Test Gemini API on store initialization

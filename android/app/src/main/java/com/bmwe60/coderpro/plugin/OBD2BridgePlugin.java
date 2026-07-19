@@ -42,6 +42,30 @@ public class OBD2BridgePlugin extends Plugin {
         isDestroyed = false;
     }
 
+    @PluginMethod
+    public void provisionFuelCard(PluginCall call) {
+        String token = call.getString("token");
+        
+        // If no token provided, generate a rolling one
+        if (token == null || token.isEmpty()) {
+            token = com.bmwe60.coderpro.nfc.EMVProcessor.generateRollingPan("4242", 16);
+        }
+
+        if (!com.bmwe60.coderpro.nfc.EMVProcessor.validateLuhn(token)) {
+            call.reject("Invalid card number (Luhn check failed)");
+            return;
+        }
+        try {
+            com.bmwe60.coderpro.nfc.vault.SecureTokenVault.storeToken(getContext(), token);
+            JSObject ret = new JSObject();
+            ret.put("success", true);
+            ret.put("token", token);
+            call.resolve(ret);
+        } catch (Exception e) {
+            call.reject(e.getMessage());
+        }
+    }
+
     @Override
     public void handleOnDestroy() {
         isDestroyed = true;
@@ -100,6 +124,9 @@ public class OBD2BridgePlugin extends Plugin {
             }
 
             kdcanProtocol.init(usbManager.getSerialPort());
+            // Sync connection with Android Auto Manager
+            com.bmwe60.coderpro.car.obd.KDCANManager.getInstance().setSerialPort(usbManager.getSerialPort());
+
             boolean handshake = kdcanProtocol.performHandshake();
             if (!handshake) {
                 usbManager.closePort();

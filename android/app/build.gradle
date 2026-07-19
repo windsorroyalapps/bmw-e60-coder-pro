@@ -3,11 +3,11 @@ plugins {
 }
 
 android {
-    namespace "com.bmwe60.app"
+    namespace "com.bmwe60.coderpro"
     compileSdk 35
 
     defaultConfig {
-        applicationId "com.bmwe60.app"
+        applicationId "com.bmwe60.coderpro"
         minSdk 26
         targetSdk 35
         versionCode 1
@@ -22,8 +22,8 @@ android {
     }
 
     compileOptions {
-        sourceCompatibility JavaVersion.VERSION_21
-        targetCompatibility JavaVersion.VERSION_21
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
     }
 
     packagingOptions {
@@ -42,4 +42,9 @@ dependencies {
     implementation 'com.google.android.gms:play-services-base:18.3.0'
     implementation 'androidx.car.app:app:1.4.0'
     implementation 'androidx.car.app:app-projected:1.4.0'
+    implementation 'com.github.mik3y:usb-serial-for-android:3.8.0'
+
+    testImplementation 'junit:junit:4.13.2'
+    androidTestImplementation 'androidx.test.ext:junit:1.1.5'
+    androidTestImplementation 'androidx.test.espresso:espresso-core:3.5.1'
 }

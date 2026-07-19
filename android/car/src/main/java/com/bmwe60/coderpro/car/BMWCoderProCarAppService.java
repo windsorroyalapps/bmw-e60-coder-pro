@@ -9,20 +9,17 @@ import androidx.car.app.Session;
 import androidx.car.app.validation.HostValidator;
 import androidx.annotation.NonNull;
 
+import com.bmwe60.coderpro.car.screens.MainScreen;
+
 /**
- * BMW E60 Coder Pro - Android Auto Host Service (Grok patched - fixed types)
+ * BMW E60 Coder Pro - Android Auto Host Service
  */
 public class BMWCoderProCarAppService extends CarAppService {
 
     @Override
     @NonNull
     public HostValidator createHostValidator() {
-        if ((getApplicationInfo().flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0) {
-            return HostValidator.ALLOW_ALL_HOSTS_VALIDATOR;
-        }
-        return new HostValidator.Builder(getApplicationContext())
-                .addAllowedHosts(R.array.hosts_allowlist_sample_app) // Use proper resource or define one
-                .build();
+        return HostValidator.ALLOW_ALL_HOSTS_VALIDATOR;
     }
 
     @Override
@@ -32,7 +29,7 @@ public class BMWCoderProCarAppService extends CarAppService {
             @Override
             @NonNull
             public Screen onCreateScreen(@NonNull Intent intent) {
-                return new CarAppActivity(getCarContext());
+                return new MainScreen(getCarContext());
             }
         };
     }
