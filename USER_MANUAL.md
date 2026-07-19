@@ -48,22 +48,54 @@ Adjust vehicle parameters on the fly:
 - Scan all modules for fault codes.
 - Tap **Clear All** to reset the DME and other module memories.
 
+### **AI Analysis (Car)**
+- Receive real-time performance assessments while driving.
+- The AI monitors telemetry for knock and AFR stability, providing verbal or on-screen recommendations for timing adjustments.
+
+### **Data Logs**
+- **Recording**: Tap **Record** to begin a high-speed telemetry log.
+- **Live Stream**: View real-time Boost, Oil Temp, and Ignition Correction.
+- **Storage**: Logs are saved locally on your phone and can be exported as CSV for review in MegaLogViewer.
+
 ---
 
 ## 4. Mobile App Features
 
+### **Gauges & Real-time Monitoring**
+- **Mobile Gauges**: High-resolution Canvas renderer showing RPM, Boost, Oil Temp, and Coolant.
+- **Layouts**: Swipe left/right on the mobile gauge screen to switch between "Classic BMW", "M-Sport", and "Track" visual styles.
+- **Peak Recall**: Tap any gauge to see the maximum value recorded during the current session.
+
 ### **AI Tuning & DME Flash**
 - **Map Selection**: Choose from Stage 0 (Stock) to Stage 3 performance maps.
 - **Injector Coding**: Set flow rates for Bosch, EV14, or Siemens Deka injectors.
-- **Flashing**: Use "Quick Flash" for map changes (2 mins) or "Full Flash" for complete ROM updates (12 mins).
+- **Flashing Process**:
+    1. Select your target map.
+    2. Tap **Start Flash**. The app will perform a 7-step safety check (Voltage, Temp, Communication, etc.).
+    3. Use "Quick Flash" for map changes (2 mins) or "Full Flash" for complete ROM updates (12 mins).
+    *Note: If the flash fails, the app will automatically attempt a Recovery Flash.*
+
+### **Coding & VO Editor**
+- **Vehicle Order (VO)**: Modify the factory build string.
+- **Common Retrofits**: Enable AFS (2VB), AUX Input, or M-Track Mode in the DSC module.
+- **Backups**: The app automatically creates a NCSFCS/MAN backup before any coding change.
 
 ### **Controller Drive**
-- Connect an Xbox Controller to your phone or the AA USB port.
-- **Controls**:
-    - **Left Trigger/Stick**: Steering.
-    - **Right Trigger**: Throttle.
-    - **Bumpers**: Gear shifts (EGS).
-    - **A/B/X/Y Buttons**: Mapped to VO (Vehicle Order) shortcuts like AFS Toggle.
+- **Connectivity**: Connect an Xbox, PlayStation (PS4 DualShock or PS5 DualSense), or Generic controller to your phone or the vehicle's Android Auto USB port.
+- **Safety Protocol**: You must pass the "Safety Check" (Brake pedal press + Neutral confirm) before the controller can influence steering or throttle.
+- **Modes**:
+    - **Comfort**: Linear throttle and smoothed steering.
+    - **Sport**: Aggressive response and 1:1 steering ratio.
+- **Controls (Xbox / PS Mapping)**:
+    - **Left Stick / L3**: Steering (AFS control).
+    - **Right Trigger / R2**: Throttle.
+    - **Left Trigger / L2**: Brake.
+    - **Bumpers (LB/RB / L1/R1)**: Manual gear shifting (compatible with EGS/SAT retrofits).
+    - **Y / Triangle**: Toggle Active Front Steering (AFS) or Horn (Hold).
+    - **X / Square**: Headlight Flash/Toggle.
+    - **Start / Options**: Enable Controller Drive / Remote Start (if LT/L2 held).
+    - **Xbox / PS Button**: Emergency Stop (Kills engine & ignition).
+    - **Touchpad (PS5 only)**: Mapped to iDrive rotation emulation.
 
 ### **AI Analysis**
 - Monitor engine health in real-time.
