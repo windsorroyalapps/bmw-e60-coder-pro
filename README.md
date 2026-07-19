@@ -2,6 +2,11 @@
 
 Complete BMW E60 tuning, diagnostics, and Xbox controller drive platform for Android Automotive OS and standard Android devices.
 
+## Documentation
+
+- **[User Manual](USER_MANUAL.md)**: Detailed instructions for using all features, including Live Tuning, Android Auto, and Controller Drive.
+- **[Build Guide](BUILD_GUIDE.md)**: Technical details for developers and building from source.
+
 ## Features
 
 - **NFC HCE Fuel Payment**: Contactless fuel payment emulation (MasterCard/Visa/Amex) with secure token vault.
