@@ -113,30 +113,43 @@ else
     exit 1
 fi
 
-# Step 9: Build Android APK
-log_info "Step 9: Building Android release APK..."
+# Step 9: Build Android release APK
+log_info "Step 9: Building Android modules (app and car)..."
 cd android
 
 if [ -f "gradlew" ]; then
     chmod +x gradlew
-    
+
+    # Run linting and unit tests to ensure stability
+    log_info "Running quality checks (Lint & Tests)..."
+    ./gradlew :app:lintRelease :car:lintRelease test
+
     # Build release APK
+    log_info "Executing assembleRelease..."
     ./gradlew assembleRelease
     
     if [ $? -eq 0 ]; then
-        log_info "APK build completed successfully!"
+        log_info "Build completed successfully!"
         
         # Find and report APK location
         APK_PATH="app/build/outputs/apk/release/app-release.apk"
         if [ -f "$APK_PATH" ]; then
-            log_info "APK Location: $(pwd)/$APK_PATH"
-            
-            # Calculate APK size
+            log_info "Main APK Location: $(pwd)/$APK_PATH"
             APK_SIZE=$(du -h "$APK_PATH" | cut -f1)
-            log_info "APK Size: $APK_SIZE"
+            log_info "Main APK Size: $APK_SIZE"
         fi
+
+        # Check for car module output (AAR)
+        AAR_PATH="car/build/outputs/aar/car-release.aar"
+        if [ -f "$AAR_PATH" ]; then
+            log_info "Car Library (AAR) Location: $(pwd)/$AAR_PATH"
+        fi
+
+        # Optional: Copy to root for easy access
+        cp "$APK_PATH" ../BMW-E60-Coder-Pro-Release.apk
+        log_info "Copied release APK to root directory"
     else
-        log_error "APK build failed"
+        log_error "Android build failed"
         exit 1
     fi
 else

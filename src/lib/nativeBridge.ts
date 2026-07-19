@@ -50,6 +50,11 @@ export interface OBD2BridgePlugin {
   // CAN bus
   sendCANCommands(options: { commands: CANCommand[] }): Promise<{ success: boolean; sent: number }>;
 
+  // Coding operations
+  readFA(): Promise<{ success: boolean; fa: string; vin: string }>;
+  writeFA(options: { fa: string }): Promise<{ success: boolean }>;
+  executeJob(options: { ecu: string; job: string; data?: string }): Promise<{ success: boolean; response: string }>;
+
   // Flash Backup / Restore
   backupDME(): Promise<{
     success: boolean;

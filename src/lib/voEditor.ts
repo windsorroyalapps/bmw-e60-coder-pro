@@ -21,9 +21,10 @@ export interface VOCode {
 
 export const VO_OPTIONS: VOOption[] = [
   // Steering
-  { code: '2VB', name: 'Active Front Steering (AFS)', category: 'steering', description: 'Active Front Steering - variable steering ratio via actuator', requiresHardware: true, warning: 'Requires AFS hardware ( actuator + control module )', defaultEnabled: false },
-  { code: '2VH', name: 'Active Steering', category: 'steering', description: 'Full active steering system with variable ratio and rear-wheel steer capability', requiresHardware: true, warning: 'Requires complete active steering hardware', defaultEnabled: false },
-  { code: '2MD', name: 'M Sport Steering', category: 'steering', description: 'M Sport steering rack with heavier feel and faster ratio', requiresHardware: true, defaultEnabled: false },
+  { code: '217', name: 'Active Steering', category: 'steering', description: 'Active Front Steering (AFS) with variable ratio and electronic override', requiresHardware: true, defaultEnabled: false },
+  { code: '2VB', name: 'Tyre Pressure Indicator', category: 'steering', description: 'RDC Tyre Pressure Monitoring System', requiresHardware: true, defaultEnabled: false },
+  { code: '2MD', name: 'M Drive', category: 'steering', description: 'M Drive vehicle dynamics configuration (M-models only)', requiresHardware: true, defaultEnabled: false },
+  { code: 'F10W', name: 'F10 M5 Wheel Retrofit', category: 'steering', description: 'Electronic compatibility patch for F10 M5 steering wheel electronics and paddles', requiresHardware: true, warning: 'Requires custom slip-ring wiring for full AFS compatibility', defaultEnabled: false },
   { code: '2PA', name: 'Steering Wheel Paddles', category: 'steering', description: 'Steering wheel-mounted paddle shifters for automatic transmissions', requiresHardware: true, defaultEnabled: false },
   // Engine
   { code: '840', name: 'Speed Limit Increase', category: 'engine', description: 'Increase electronic top speed limiter', requiresHardware: false, defaultEnabled: false },
@@ -99,14 +100,8 @@ export function buildNCSString(vo: VOProfile): string {
 export function validateVOCombination(options: string[]): string[] {
   const warnings: string[] = [];
   // AFS requires specific chassis preparation
-  if (options.includes('2VB') && !options.includes('2VH')) {
-    warnings.push('AFS (2VB) works best with Active Steering (2VH) — consider adding both');
-  }
-  if (options.includes('2VH') && !options.includes('2VB')) {
-    warnings.push('Active Steering (2VH) includes AFS functionality');
-  }
-  if (options.includes('5AG') && !options.includes('5AS')) {
-    warnings.push('Blind Spot Detection (5AG) requires Active Driving Assistant (5AS)');
+  if (options.includes('217') && options.includes('F10W')) {
+    warnings.push('F10 Wheel Retrofit detected with Active Steering — App will apply LWS/SZL communication patches.');
   }
   if (options.includes('2PA') && !options.includes('205')) {
     warnings.push('Paddle shifters (2PA) require Steptronic (205)');

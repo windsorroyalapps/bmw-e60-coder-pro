@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="app_name">BMW E60 Coder Pro</string>
     <string name="car_app_name">BMW E60 Coder Pro</string>
     <string name="tuning_title">Live Tuning &amp; Performance</string>
     <string name="clear_adaptations">Clear Adaptations</string>

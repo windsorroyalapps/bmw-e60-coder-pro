@@ -1,10 +1,13 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useStore } from '@/hooks/useStore';
 import { getDTCInfo, searchDTCs } from '@/lib/dtcDatabase';
+import { getDtcDefinition } from '@/lib/geminiAiService';
+import type { AiDtcDefinition } from '@/lib/geminiAiService';
 import type { DTCInfo } from '@/lib/dtcDatabase';
 import {
   AlertTriangle, Search, X, ChevronRight,
-  Activity, CircleDot, ShieldAlert, Info
+  Activity, CircleDot, ShieldAlert, Info,
+  Wrench, AlertCircle, Loader2
 } from 'lucide-react';
 
 const SEVERITY_COLORS = {
@@ -20,10 +23,24 @@ const SEVERITY_LABELS = {
 };
 
 export const DTCPage: React.FC = () => {
-  const { obd2 } = useStore();
+  const { obd2, profile } = useStore();
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedDTC, setSelectedDTC] = useState<DTCInfo | null>(null);
+  const [selectedDTC, setSelectedDTC] = useState<DTCInfo | AiDtcDefinition | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
   const [activeFilter, setActiveFilter] = useState<'all' | 'info' | 'warning' | 'critical'>('all');
+
+  const handleDtcClick = async (dtc: DTCInfo) => {
+    setSelectedDTC(dtc);
+    setAiLoading(true);
+    try {
+      const aiDef = await getDtcDefinition(dtc.code, profile.engine);
+      setSelectedDTC(aiDef);
+    } catch (err) {
+      console.error('Failed to get AI DTC definition', err);
+    } finally {
+      setAiLoading(false);
+    }
+  };
 
   // Simulated active DTCs from ECU
   const activeDTCs: DTCInfo[] = [
@@ -62,7 +79,7 @@ export const DTCPage: React.FC = () => {
           {activeDTCs.map(dtc => (
             <button
               key={dtc.code}
-              onClick={() => setSelectedDTC(dtc)}
+              onClick={() => handleDtcClick(dtc)}
               className={`w-full flex items-center gap-3 p-2.5 rounded-lg border text-left transition-colors ${SEVERITY_COLORS[dtc.severity]}`}
             >
               <ShieldAlert className="w-4 h-4 flex-shrink-0" />
@@ -128,7 +145,7 @@ export const DTCPage: React.FC = () => {
             {filteredResults.map(dtc => (
               <button
                 key={dtc.code}
-                onClick={() => setSelectedDTC(dtc)}
+                onClick={() => handleDtcClick(dtc)}
                 className="w-full flex items-center gap-3 p-2.5 rounded-lg hover:bg-[#161b22] text-left transition-colors"
               >
                 <span className={`text-xs px-1.5 py-0.5 rounded ${SEVERITY_COLORS[dtc.severity]}`}>
@@ -145,36 +162,68 @@ export const DTCPage: React.FC = () => {
       {/* DTC Detail Modal */}
       {selectedDTC && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-          <div className="bg-[#0d1117] rounded-2xl border border-gray-700 shadow-2xl w-full max-w-sm p-5">
+          <div className="bg-[#0d1117] rounded-2xl border border-gray-700 shadow-2xl w-full max-w-sm p-5 max-h-[80vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-4">
-              <div className={`text-lg font-mono font-bold ${SEVERITY_COLORS[selectedDTC.severity].split(' ')[0]}`}>
-                {selectedDTC.code}
+              <div className="flex items-center gap-2">
+                <div className={`text-lg font-mono font-bold ${SEVERITY_COLORS[selectedDTC.severity].split(' ')[0]}`}>
+                  {selectedDTC.code}
+                </div>
+                {aiLoading && <Loader2 className="w-4 h-4 text-blue-400 animate-spin" />}
               </div>
               <button onClick={() => setSelectedDTC(null)} className="text-gray-500 hover:text-white">
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <div className="space-y-3">
+
+            <div className="space-y-4">
               <div>
-                <div className="text-xs text-gray-500 mb-1">Description</div>
-                <div className="text-sm text-white">{selectedDTC.description}</div>
+                <div className="text-xs text-gray-500 mb-1 flex items-center gap-1">
+                  <Info className="w-3 h-3" /> Description
+                </div>
+                <div className="text-sm text-white leading-relaxed">{selectedDTC.description}</div>
               </div>
-              <div>
-                <div className="text-xs text-gray-500 mb-1">System</div>
-                <div className="text-sm text-white">{selectedDTC.system}</div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <div className="text-xs text-gray-500 mb-1">System</div>
+                  <div className="text-sm text-white font-medium">{selectedDTC.system}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-gray-500 mb-1">Severity</div>
+                  <span className={`text-[10px] px-2 py-0.5 rounded uppercase font-bold ${SEVERITY_COLORS[selectedDTC.severity]}`}>
+                    {SEVERITY_LABELS[selectedDTC.severity]}
+                  </span>
+                </div>
               </div>
-              <div>
-                <div className="text-xs text-gray-500 mb-1">Severity</div>
-                <span className={`text-xs px-2 py-1 rounded ${SEVERITY_COLORS[selectedDTC.severity]}`}>
-                  {SEVERITY_LABELS[selectedDTC.severity]}
-                </span>
-              </div>
+
+              {'causes' in selectedDTC && selectedDTC.causes.length > 0 && (
+                <div>
+                  <div className="text-xs text-gray-500 mb-1 flex items-center gap-1">
+                    <AlertCircle className="w-3 h-3" /> Possible Causes
+                  </div>
+                  <ul className="text-xs text-gray-300 space-y-1 list-disc pl-4">
+                    {selectedDTC.causes.map((cause, i) => <li key={i}>{cause}</li>)}
+                  </ul>
+                </div>
+              )}
+
+              {'recommendation' in selectedDTC && selectedDTC.recommendation && (
+                <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-3">
+                  <div className="text-[10px] text-blue-400 font-bold uppercase mb-1 flex items-center gap-1">
+                    <Wrench className="w-3 h-3" /> Tech Recommendation
+                  </div>
+                  <div className="text-xs text-blue-100 italic">
+                    {selectedDTC.recommendation}
+                  </div>
+                </div>
+              )}
             </div>
+
             <button
               onClick={() => setSelectedDTC(null)}
-              className="w-full mt-4 bg-blue-600 hover:bg-blue-700 text-white py-2.5 rounded-xl transition-colors text-sm"
+              className="w-full mt-6 bg-gray-800 hover:bg-gray-700 text-white py-2.5 rounded-xl transition-colors text-sm font-medium"
             >
-              Close
+              Dismiss
             </button>
           </div>
         </div>

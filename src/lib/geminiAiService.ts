@@ -37,6 +37,16 @@ export interface AiAnalysisResult {
   risks: string[];
 }
 
+export interface AiDtcDefinition {
+  code: string;
+  description: string;
+  system: string;
+  severity: 'info' | 'warning' | 'critical';
+  causes: string[];
+  symptoms: string[];
+  recommendation: string;
+}
+
 export interface AiRecommendation {
   parameter: string;
   currentValue: number;
@@ -103,6 +113,52 @@ export async function analyzeLiveData(
   } catch (err) {
     console.warn('Gemini AI failed, using fallback:', err);
     return localFallbackAnalysis(liveData, engineType);
+  }
+}
+
+export async function getDtcDefinition(code: string, engineType: string): Promise<AiDtcDefinition> {
+  const key = getApiKey();
+  const systemPrompt = `You are a BMW Master Technician. Provide a detailed definition for the given BMW DTC (Diagnostic Trouble Code).
+  Respond ONLY with valid JSON in this exact format:
+  {"code":"CODE","description":"Clear English description","system":"Affected System","severity":"info|warning|critical","causes":["possible cause 1"],"symptoms":["symptom 1"],"recommendation":"What to do next"}`;
+
+  const userPrompt = `DTC Code: ${code}, Engine: ${engineType}`;
+
+  if (!key) {
+    return {
+      code,
+      description: "AI Lookup unavailable. Check Internet connection or API key.",
+      system: "Unknown",
+      severity: "info",
+      causes: [],
+      symptoms: [],
+      recommendation: "Please check the code manually."
+    };
+  }
+
+  try {
+    const resp = await fetch(`${GEMINI_API_BASE}/${MODEL_NAME}:generateContent?key=${key}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: systemPrompt + '\n\n' + userPrompt }] }],
+        generationConfig: { temperature: 0.1, maxOutputTokens: 1024, responseMimeType: 'application/json' },
+      }),
+    });
+    const data = await resp.json();
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
+    return JSON.parse(text) as AiDtcDefinition;
+  } catch (err) {
+    console.error('Gemini DTC lookup failed:', err);
+    return {
+      code,
+      description: "Error retrieving definition.",
+      system: "Unknown",
+      severity: "warning",
+      causes: [],
+      symptoms: [],
+      recommendation: "Error occurred during AI lookup."
+    };
   }
 }
 

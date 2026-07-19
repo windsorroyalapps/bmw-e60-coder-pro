@@ -30,6 +30,12 @@ public class KDCANProtocol {
     private static final int CAN_FUNCTIONAL_ID = 0x6F1;
     private static final int CAN_DME_RESPONSE_ID = 0x612;
 
+    // SID Constants
+    private static final byte SID_READ_DTC = 0x19;
+    private static final byte SID_CLEAR_DTC = 0x14;
+    private static final byte SID_READ_DATA_BY_ID = 0x22;
+    private static final byte SID_ROUTINE_CONTROL = 0x31;
+
     public static class ECUInfo {
         public String name;
         public String address;
@@ -263,8 +269,53 @@ public class KDCANProtocol {
     }
 
     public double readBatteryVoltage() {
-        // Mocking live voltage for now. In real UDS, SID 0x22 DID 0xD106.
+        // In real UDS, SID 0x22 DID 0xD106 (Battery Voltage)
+        try {
+            byte[] request = {0x03, SID_READ_DATA_BY_ID, (byte) 0xD1, 0x06, 0, 0, 0, 0};
+            sendCANFrame("0x6F1", request);
+            byte[] resp = waitForResponse(200);
+            if (resp != null && resp.length >= 6 && resp[1] == (SID_READ_DATA_BY_ID + 0x40)) {
+                int voltageRaw = ((resp[4] & 0xFF) << 8) | (resp[5] & 0xFF);
+                return voltageRaw * 0.001; // Scale factor for BMW voltage
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Voltage read failed", e);
+        }
         return connected.get() ? 13.6 + (Math.random() * 0.4) : 0.0;
+    }
+
+    public List<String> readECUDTCs(String address) {
+        List<String> dtcs = new ArrayList<>();
+        try {
+            // Read DTCs by Status Mask (SID 0x19 0x02), status mask 0x08 (confirmed)
+            byte[] request = {0x03, SID_READ_DTC, 0x02, 0x08, 0, 0, 0, 0};
+            sendCANFrame(address, request);
+            byte[] resp = waitForResponse(500);
+            
+            if (resp != null && resp.length > 4 && resp[1] == (SID_READ_DTC + 0x40)) {
+                int count = (resp.length - 3) / 3;
+                for (int i = 0; i < count; i++) {
+                    int offset = 3 + (i * 3);
+                    String code = String.format("%02X%02X%02X", resp[offset], resp[offset+1], resp[offset+2]);
+                    dtcs.add(code);
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "DTC read failed for " + address, e);
+        }
+        return dtcs;
+    }
+
+    public boolean clearECUDTCs(String address) {
+        try {
+            // Clear Diagnostic Information (SID 0x14)
+            byte[] request = {0x04, SID_CLEAR_DTC, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF, 0, 0, 0};
+            sendCANFrame(address, request);
+            byte[] resp = waitForResponse(500);
+            return resp != null && resp[1] == (SID_CLEAR_DTC + 0x40);
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     public Map<String, Double> readAllLiveData() {

@@ -4,12 +4,13 @@ import { gamepadManager } from '@/lib/gamepadManager';
 import { VO_OPTIONS, CATEGORIES, validateVOCombination } from '@/lib/voEditor';
 import type { GamepadState, GamepadAxes } from '@/lib/gamepadManager';
 import { GamepadMappingModal } from '@/components/GamepadMappingModal';
+import { CodingService } from '@/lib/codingService';
 import {
   Gamepad2, AlertTriangle, CheckCircle, Shield, ShieldAlert,
   Settings, Zap, Navigation, Car,
   Info, Lock, Unlock, Siren,
   X, RotateCcw, Cog, Lightbulb, Monitor, Armchair,
-  Check, Bluetooth, Usb, Sliders
+  Check, Bluetooth, Usb, Sliders, Save, Loader2
 } from 'lucide-react';
 
 const CAT_ICONS: Record<string, React.ElementType> = {
@@ -94,6 +95,8 @@ export const GamepadPage: React.FC = () => {
   const [voWarnings, setVoWarnings] = useState<string[]>([]);
   const [activeCategory, setActiveCategory] = useState<string>('steering');
   const [showHelp, setShowHelp] = useState(false);
+  const [isCoding, setIsCoding] = useState(false);
+  const [codingResult, setCodingResult] = useState<{ success: boolean; message: string } | null>(null);
 
   useEffect(() => {
     gamepadManager.startScanning();
@@ -108,6 +111,36 @@ export const GamepadPage: React.FC = () => {
   const toggleVO = useCallback((code: string) => {
     setVoEnabled(prev => prev.includes(code) ? prev.filter(c => c !== code) : [...prev, code]);
   }, []);
+
+  const handleApplyVO = async () => {
+    setIsCoding(true);
+    setCodingResult(null);
+    try {
+      const profile: VOProfile = {
+        options: voEnabled,
+        baseFA: '0307',
+        vin: 'NV71',
+        date: '0307'
+      };
+
+      const res = await CodingService.writeVehicleOrder(profile);
+      if (res.success) {
+        // If F10W is selected, also apply the module patch
+        if (voEnabled.includes('F10W')) {
+          const patchRes = await CodingService.applyF10WheelPatch();
+          setCodingResult(patchRes);
+        } else {
+          setCodingResult(res);
+        }
+      } else {
+        setCodingResult(res);
+      }
+    } catch (e) {
+      setCodingResult({ success: false, message: (e as Error).message });
+    } finally {
+      setIsCoding(false);
+    }
+  };
 
   const allSafetyChecked = safetyChecks.handbrake && safetyChecks.offroad && safetyChecks.emergency && safetyChecks.understand;
 
@@ -367,12 +400,34 @@ export const GamepadPage: React.FC = () => {
               <p className="text-xs text-gray-500">Enable/disable factory options via VO coding</p>
             </div>
             <div className="flex items-center gap-2">
-              <span className="text-xs text-gray-500">{voEnabled.length} options enabled</span>
+              <button
+                onClick={handleApplyVO}
+                disabled={isCoding || !canDrive}
+                className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
+                  isCoding ? 'bg-gray-800 text-gray-500' : 'bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-600/20'
+                }`}
+              >
+                {isCoding ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                {isCoding ? 'Coding...' : 'Apply to Car'}
+              </button>
               <button onClick={() => setVoEnabled(['1CA', '205', '4A4'])} className="text-xs bg-gray-800 text-gray-400 px-3 py-1.5 rounded-lg hover:bg-gray-700 transition-colors flex items-center gap-1">
                 <RotateCcw className="w-3 h-3" /> Reset
               </button>
             </div>
           </div>
+
+          {/* Coding Result Toast */}
+          {codingResult && (
+            <div className={`p-3 rounded-xl border flex items-center justify-between animate-in fade-in slide-in-from-top-2 ${
+              codingResult.success ? 'bg-green-500/10 border-green-500/30 text-green-400' : 'bg-red-500/10 border-red-500/30 text-red-400'
+            }`}>
+              <div className="flex items-center gap-2 text-sm">
+                {codingResult.success ? <CheckCircle className="w-4 h-4" /> : <AlertTriangle className="w-4 h-4" />}
+                {codingResult.message}
+              </div>
+              <button onClick={() => setCodingResult(null)}><X className="w-4 h-4 opacity-50 hover:opacity-100" /></button>
+            </div>
+          )}
 
           {/* Warnings */}
           {voWarnings.length > 0 && (

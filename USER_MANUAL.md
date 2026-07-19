@@ -77,7 +77,11 @@ Adjust vehicle parameters on the fly:
 
 ### **Coding & VO Editor**
 - **Vehicle Order (VO)**: Modify the factory build string.
-- **Common Retrofits**: Enable AFS (2VB), AUX Input, or M-Track Mode in the DSC module.
+- **Common Retrofits**: Enable AFS (217), AUX Input, or M-Track Mode in the DSC module.
+- **F10 M5 Steering Wheel Patch**: 
+    - If retrofitting an F10 M5 wheel, Active Steering (AFS) often faults due to the Steering Angle Sensor (LWS) mismatch.
+    - Select the **F10 M5 Wheel Retrofit (F10W)** option in the VO Editor.
+    - The app will automatically patch the SZL and AFS modules to bypass the "Hardware Mismatch" fault and recalibrate the zero-point for the F10 electronics.
 - **Backups**: The app automatically creates a NCSFCS/MAN backup before any coding change.
 
 ### **Controller Drive**

@@ -92,20 +92,25 @@ jobs:
         working-directory: ./android
         env:
           GRADLE_OPTS: "-Xmx2048m -Dorg.gradle.daemon=false"
-        run: ./gradlew assembleDebug --stacktrace --no-daemon
+        run: |
+          ./gradlew :car:assembleDebug :app:assembleDebug --stacktrace --no-daemon
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: bmw-e60-coder-pro-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          path: |
+            android/app/build/outputs/apk/debug/app-debug.apk
+            android/car/build/outputs/aar/car-debug.aar
 
       - name: Rename APK for release
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
           mkdir -p release-assets
           cp android/app/build/outputs/apk/debug/app-debug.apk \
-             release-assets/BMW-E60-Coder-Pro-AndroidAuto.apk
+             release-assets/BMW-E60-Coder-Pro-v${{ github.ref_name }}.apk
+          cp android/car/build/outputs/aar/car-debug.aar \
+             release-assets/BMW-E60-Coder-Pro-CarLib-v${{ github.ref_name }}.aar
 
       - name: Upload APK release asset
         if: startsWith(github.ref, 'refs/tags/v')
@@ -135,7 +140,8 @@ jobs:
         with:
           files: |
             BMW-E60-Coder-Pro-web.zip
-            apk-release/BMW-E60-Coder-Pro-AndroidAuto.apk
+            apk-release/*.apk
+            apk-release/*.aar
           fail_on_unmatched_files: false
           generate_release_notes: true
         env:

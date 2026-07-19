@@ -17,6 +17,10 @@
         android:requestLegacyExternalStorage="true"
         android:hardwareAccelerated="true">
 
+        <meta-data
+            android:name="com.google.android.gms.car.application"
+            android:resource="@xml/automotive_app_desc" />
+
         <service
             android:name=".nfc.FuelPaymentService"
             android:exported="true"
