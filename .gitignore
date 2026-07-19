@@ -7,3 +7,9 @@ build/
 *.jks
 .DS_Store
 *.log
+.idea/
+*.iml
+*.ipr
+*.iws
+out/
+gen/
