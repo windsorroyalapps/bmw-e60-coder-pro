@@ -1,6 +1,6 @@
 plugins {
     id 'com.android.application'
-    id 'org.jetbrains.kotlin.android'   // <-- This was missing!
+    id 'org.jetbrains.kotlin.android'  // Required for debug build
 }
 
 android {
