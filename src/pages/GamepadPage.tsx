@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useStore } from '@/hooks/useStore';
 import { gamepadManager } from '@/lib/gamepadManager';
-import { VO_OPTIONS, CATEGORIES, validateVOCombination } from '@/lib/voEditor';
+import { VO_OPTIONS, CATEGORIES, validateVOCombination, VOProfile } from '@/lib/voEditor';
 import type { GamepadState, GamepadAxes } from '@/lib/gamepadManager';
 import { GamepadMappingModal } from '@/components/GamepadMappingModal';
 import { CodingService } from '@/lib/codingService';

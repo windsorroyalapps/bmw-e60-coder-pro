@@ -1,5 +1,5 @@
 import { OBD2Bridge } from './nativeBridge';
-import { VOProfile, buildNCSString } from './voEditor';
+import { VOProfile } from './voEditor';
 
 export interface CodingResult {
   success: boolean;
