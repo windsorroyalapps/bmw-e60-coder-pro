@@ -5,6 +5,9 @@
     <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
     <uses-feature android:name="android.hardware.gamepad" android:required="false" />
     <uses-feature android:name="android.hardware.nfc.hce" android:required="true" />
+<uses-feature android:name="android.hardware.usb.host" android:required="true" />
+<uses-permission android:name="android.permission.USB_PERMISSION" />
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
 
     <application
         android:allowBackup="true"
@@ -29,6 +32,13 @@
                 android:name="android.nfc.cardemulation.host_apdu_service"
                 android:resource="@xml/apduservice" />
         </service>
+<activity ...>
+    <intent-filter>
+        <action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" />
+    </intent-filter>
+    <meta-data android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED"
+               android:resource="@xml/usb_device_filter" />
+</activity>
 
         <activity
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation"
