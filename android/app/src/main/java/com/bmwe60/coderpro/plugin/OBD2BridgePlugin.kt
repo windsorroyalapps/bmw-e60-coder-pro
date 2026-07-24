@@ -131,19 +131,15 @@ class OBD2BridgePlugin : Plugin() {
     }
 
     companion object {
-        interface PermissionCallback {
-            fun onPermissionResult(granted: Boolean)
-        }
-
-        private var pendingPermissionCallback: PermissionCallback? = null
+        private var pendingPermissionCallback: UsbSerialManager.PermissionCallback? = null
 
         @JvmStatic
-        fun setPendingPermissionCallback(device: Any, callback: PermissionCallback) {
+        fun setPendingPermissionCallback(device: Any, callback: UsbSerialManager.PermissionCallback) {
             pendingPermissionCallback = callback
         }
 
         @JvmStatic
-        fun getPendingPermissionCallback(): PermissionCallback? = pendingPermissionCallback
+        fun getPendingPermissionCallback(): UsbSerialManager.PermissionCallback? = pendingPermissionCallback
 
         @JvmStatic
         fun clearPendingPermissionCallback() {
