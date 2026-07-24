@@ -8,9 +8,6 @@ import android.hardware.usb.UsbDevice;
 import android.hardware.usb.UsbManager;
 import android.os.Build;
 
-import com.hoho.android.usbserial.driver.UsbSerialDriver;
-import com.hoho.android.usbserial.driver.UsbSerialProber;
-
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
@@ -32,8 +29,6 @@ public class OBD2BridgePlugin extends Plugin {
 
     private UsbSerialManager usbManager;
     private KDCANProtocol kdcanProtocol;
-    private CANBusManager canBusManager;
-    private DMEFlashService dmeFlashService;
     private volatile boolean isDestroyed = false;
     private BroadcastReceiver usbPermissionReceiver;
     private BroadcastReceiver usbAttachReceiver;
@@ -47,8 +42,6 @@ public class OBD2BridgePlugin extends Plugin {
         super.load();
         usbManager = new UsbSerialManager(getContext());
         kdcanProtocol = new KDCANProtocol();
-        canBusManager = new CANBusManager();
-        dmeFlashService = new DMEFlashService();
         isDestroyed = false;
         registerReceivers();
     }
@@ -187,7 +180,7 @@ public class OBD2BridgePlugin extends Plugin {
 
             UsbSerialManager.CableInfo targetCable = cables.get(0);
             UsbDevice targetDevice = null;
-            for (UsbSerialDriver driver : UsbSerialProber.getDefaultProber().findAllDrivers(usbManager.getUsbManager())) {
+            for (com.hoho.android.usbserial.driver.UsbSerialDriver driver : com.hoho.android.usbserial.driver.UsbSerialProber.getDefaultProber().findAllDrivers(usbManager.getUsbManager())) {
                 if (driver.getDevice().getVendorId() == targetCable.vendorId
                     && driver.getDevice().getProductId() == targetCable.productId) {
                     targetDevice = driver.getDevice();
@@ -197,7 +190,7 @@ public class OBD2BridgePlugin extends Plugin {
 
             if (targetDevice == null) {
                 result.put("success", false);
-                result.put("error", "Adapter found but driver mismatch.");
+                result.put("error", "Adapter found but driver mismatch. Try Generic USB Serial preset.");
                 call.resolve(result);
                 return;
             }
@@ -220,7 +213,7 @@ public class OBD2BridgePlugin extends Plugin {
                             if (savedCall != null) {
                                 JSObject r = new JSObject();
                                 r.put("success", false);
-                                r.put("error", "USB permission denied by user.");
+                                r.put("error", "USB permission denied by user. Grant permission in system dialog.");
                                 savedCall.resolve(r);
                             }
                         });
@@ -233,30 +226,52 @@ public class OBD2BridgePlugin extends Plugin {
             boolean opened = usbManager.openPort(targetDevice);
             if (!opened) {
                 result.put("success", false);
-                result.put("error", "Failed to open USB serial port.");
+                result.put("error", "Failed to open USB serial port. Try unplugging and reconnecting the adapter.");
                 call.resolve(result);
                 return;
             }
 
-            if ("KDCAN".equalsIgnoreCase(adapterType) || targetCable.type.contains("K+DCAN")) {
-                usbManager.setBMWKLineMode();
-            } else if ("ELM327".equalsIgnoreCase(adapterType) || targetCable.detectedChip.contains("Ftdi") || targetCable.detectedChip.contains("CH340")) {
+            // Configure based on adapter type
+            boolean isELM327 = "ELM327".equalsIgnoreCase(adapterType);
+            boolean isGeneric = targetCable.type.contains("Generic") || targetCable.detectedChip.contains("CdcAcm");
+            
+            if (isELM327 || isGeneric) {
                 usbManager.setELM327Mode();
+            } else if ("KDCAN".equalsIgnoreCase(adapterType) || targetCable.type.contains("K+DCAN")) {
+                usbManager.setBMWKLineMode();
+            } else {
+                // AUTO mode: try BMW protocols first, then ELM327
+                usbManager.setBMWDCANMode();
             }
 
             kdcanProtocol.init(usbManager.getSerialPort());
-            com.bmwe60.coderpro.car.obd.KDCANManager.getInstance().setSerialPort(usbManager.getSerialPort());
 
-            boolean handshake = kdcanProtocol.performHandshake();
+            boolean handshake;
+            if (isELM327 || isGeneric) {
+                handshake = kdcanProtocol.performELM327Init();
+            } else {
+                handshake = kdcanProtocol.performHandshake();
+            }
+
             if (!handshake) {
-                usbManager.closePort();
-                List<String> errors = kdcanProtocol.getErrors();
-                String errorMsg = errors.isEmpty() ? "OBD2 handshake failed - no response from vehicle" : errors.get(errors.size() - 1);
-                result.put("success", false);
-                result.put("error", errorMsg);
-                result.put("details", new JSONArray(errors));
-                call.resolve(result);
-                return;
+                // For AUTO mode, try ELM327 as fallback
+                if (!isELM327 && !isGeneric && "AUTO".equalsIgnoreCase(adapterType)) {
+                    usbManager.setELM327Mode();
+                    kdcanProtocol.init(usbManager.getSerialPort());
+                    handshake = kdcanProtocol.performELM327Init();
+                }
+                
+                if (!handshake) {
+                    usbManager.closePort();
+                    List<String> errors = kdcanProtocol.getErrors();
+                    String errorMsg = errors.isEmpty() ? "Vehicle not responding. Check ignition and cable." : errors.get(errors.size() - 1);
+                    result.put("success", false);
+                    result.put("error", errorMsg);
+                    result.put("details", new JSONArray(errors));
+                    result.put("suggestion", "Try Generic USB Serial preset if using a non-BMW cable.");
+                    call.resolve(result);
+                    return;
+                }
             }
 
             List<KDCANProtocol.ECUInfo> ecus = kdcanProtocol.scanECUs();
@@ -363,27 +378,6 @@ public class OBD2BridgePlugin extends Plugin {
             call.resolve(result);
         } catch (Exception e) {
             call.reject("DME_READ_ERROR", "Failed: " + e.getMessage(), e);
-        }
-    }
-
-    @PluginMethod
-    public void provisionFuelCard(PluginCall call) {
-        String token = call.getString("token");
-        if (token == null || token.isEmpty()) {
-            token = com.bmwe60.coderpro.nfc.EMVProcessor.generateRollingPan("4242", 16);
-        }
-        if (!com.bmwe60.coderpro.nfc.EMVProcessor.validateLuhn(token)) {
-            call.reject("Invalid card number (Luhn check failed)");
-            return;
-        }
-        try {
-            com.bmwe60.coderpro.nfc.vault.SecureTokenVault.storeToken(getContext(), token);
-            JSObject ret = new JSObject();
-            ret.put("success", true);
-            ret.put("token", token);
-            call.resolve(ret);
-        } catch (Exception e) {
-            call.reject(e.getMessage());
         }
     }
 }

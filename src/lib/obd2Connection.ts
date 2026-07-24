@@ -101,7 +101,7 @@ export class OBD2ConnectionManager {
 
   subscribe(callback: (state: OBD2State) => void) {
     this.listeners.push(callback);
-    callback(this.state);
+    callback({ ...this.state });
     return () => {
       this.listeners = this.listeners.filter(l => l !== callback);
     };
@@ -196,6 +196,9 @@ export class OBD2ConnectionManager {
       } else {
         this.state.connectionState = 'error';
         this.state.lastError = result.error || 'Connection failed';
+        if (result.suggestion) {
+          this.state.lastError += ` | ${result.suggestion}`;
+        }
         this.emit();
         return false;
       }
