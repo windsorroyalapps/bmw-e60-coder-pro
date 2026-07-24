@@ -55,8 +55,11 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Build web app
-        run: npm run build
+      - name: Download web artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: dist/
 
       - name: Copy web assets to Android
         run: npm exec -- cap sync android
@@ -117,7 +120,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: apk-release
-          path: release-assets/BMW-E60-Coder-Pro-AndroidAuto.apk
+          path: release-assets/
 
   release:
     runs-on: ubuntu-latest
