@@ -8,6 +8,9 @@ import android.hardware.usb.UsbDevice;
 import android.hardware.usb.UsbManager;
 import android.os.Build;
 
+import com.hoho.android.usbserial.driver.UsbSerialDriver;
+import com.hoho.android.usbserial.driver.UsbSerialProber;
+
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
@@ -184,7 +187,7 @@ public class OBD2BridgePlugin extends Plugin {
 
             UsbSerialManager.CableInfo targetCable = cables.get(0);
             UsbDevice targetDevice = null;
-            for (UsbSerialDriver driver : usbManager.getCustomProber().findAllDrivers(usbManager)) {
+            for (UsbSerialDriver driver : UsbSerialProber.getDefaultProber().findAllDrivers(usbManager.getUsbManager())) {
                 if (driver.getDevice().getVendorId() == targetCable.vendorId
                     && driver.getDevice().getProductId() == targetCable.productId) {
                     targetDevice = driver.getDevice();

@@ -11,11 +11,6 @@ import android.util.Log;
 import com.hoho.android.usbserial.driver.UsbSerialDriver;
 import com.hoho.android.usbserial.driver.UsbSerialPort;
 import com.hoho.android.usbserial.driver.UsbSerialProber;
-import com.hoho.android.usbserial.driver.FtdiSerialDriver;
-import com.hoho.android.usbserial.driver.ProlificSerialDriver;
-import com.hoho.android.usbserial.driver.CdcAcmSerialDriver;
-import com.hoho.android.usbserial.driver.Ch34xSerialDriver;
-import com.hoho.android.usbserial.driver.Cp21xxSerialDriver;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -30,8 +25,6 @@ public class UsbSerialManager {
     private UsbSerialPort serialPort;
     private UsbDeviceConnection connection;
     private String currentProtocol = "NONE";
-    private UsbDevice pendingDevice;
-    private UsbSerialDriver pendingDriver;
 
     public interface PermissionCallback {
         void onPermissionGranted(UsbDevice device);
@@ -76,19 +69,13 @@ public class UsbSerialManager {
         return "K+DCAN / OBD2 Adapter";
     }
 
-    public UsbSerialProber getCustomProber() {
-        UsbSerialProber.CustomProber customProber = new UsbSerialProber.CustomProber();
-        customProber.addDriver(FtdiSerialDriver.class);
-        customProber.addDriver(ProlificSerialDriver.class);
-        customProber.addDriver(CdcAcmSerialDriver.class);
-        customProber.addDriver(Ch34xSerialDriver.class);
-        customProber.addDriver(Cp21xxSerialDriver.class);
-        return new UsbSerialProber(customProber);
+    public UsbManager getUsbManager() {
+        return usbManager;
     }
 
     public List<CableInfo> scanForAdapters() {
         List<CableInfo> results = new ArrayList<>();
-        UsbSerialProber prober = getCustomProber();
+        UsbSerialProber prober = UsbSerialProber.getDefaultProber();
         List<UsbSerialDriver> availableDrivers = prober.findAllDrivers(usbManager);
         for (UsbSerialDriver driver : availableDrivers) {
             UsbDevice device = driver.getDevice();
@@ -112,7 +99,6 @@ public class UsbSerialManager {
             callback.onPermissionGranted(device);
             return;
         }
-        pendingDevice = device;
         OBD2BridgePlugin.setPendingPermissionCallback(device, callback);
         int flags = PendingIntent.FLAG_IMMUTABLE;
         PendingIntent usbPermissionIntent = PendingIntent.getBroadcast(context, 0, new Intent(ACTION_USB_PERMISSION), flags);
@@ -120,7 +106,7 @@ public class UsbSerialManager {
     }
 
     public boolean openPort(UsbDevice device) {
-        UsbSerialProber prober = getCustomProber();
+        UsbSerialProber prober = UsbSerialProber.getDefaultProber();
         List<UsbSerialDriver> availableDrivers = prober.findAllDrivers(usbManager);
         UsbSerialDriver targetDriver = null;
         for (UsbSerialDriver driver : availableDrivers) {
@@ -153,7 +139,7 @@ public class UsbSerialManager {
         List<CableInfo> adapters = scanForAdapters();
         if (adapters.isEmpty()) return false;
         CableInfo first = adapters.get(0);
-        UsbSerialProber prober = getCustomProber();
+        UsbSerialProber prober = UsbSerialProber.getDefaultProber();
         for (UsbSerialDriver driver : prober.findAllDrivers(usbManager)) {
             if (driver.getDevice().getVendorId() == first.vendorId && driver.getDevice().getProductId() == first.productId) {
                 return openPort(driver.getDevice());
