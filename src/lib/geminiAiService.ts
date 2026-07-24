@@ -4,11 +4,34 @@
 import type { PerformanceMap, AiTuneRecommendation } from '@/types';
 
 function getApiKey(): string {
+  // 1. Build-time env var (set via GitHub Actions or .env.local)
   const env = (import.meta as any).env;
   const envKey = env?.VITE_GEMINI_API_KEY;
   if (envKey && envKey.length > 0) return envKey;
-  // Hardcoded fallback for production builds
-  return 'AQ.Ab8RN6LLY2zWDB6CW6AnKCrjuUiDI9ihGmyMsDF4bcZCOF1BBQ';
+
+  // 2. Runtime localStorage (user can set via Settings > AI Key)
+  try {
+    const lsKey = localStorage.getItem('gemini_api_key');
+    if (lsKey && lsKey.length > 0) return lsKey;
+  } catch {}
+
+  // 3. Runtime global (injected by native layer or debug builds)
+  try {
+    const winKey = (window as any).__GEMINI_API_KEY__;
+    if (winKey && winKey.length > 0) return winKey;
+  } catch {}
+
+  return '';
+}
+
+export function setApiKey(key: string): void {
+  try {
+    localStorage.setItem('gemini_api_key', key);
+  } catch {}
+}
+
+export function hasApiKey(): boolean {
+  return getApiKey().length > 0;
 }
 
 const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
