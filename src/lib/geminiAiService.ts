@@ -7,7 +7,8 @@ function getApiKey(): string {
   const env = (import.meta as any).env;
   const envKey = env?.VITE_GEMINI_API_KEY;
   if (envKey && envKey.length > 0) return envKey;
-  return '';
+  // Hardcoded fallback for production builds
+  return 'AQ.Ab8RN6LLY2zWDB6CW6AnKCrjuUiDI9ihGmyMsDF4bcZCOF1BBQ';
 }
 
 const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta';

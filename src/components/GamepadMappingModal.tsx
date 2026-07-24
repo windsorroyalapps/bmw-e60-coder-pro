@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { gamepadManager, GamepadMapping } from '@/lib/gamepadManager';
+import { gamepadManager, GamepadMapping, DEFAULT_MAPPINGS } from '@/lib/gamepadManager';
 import { X, Check } from 'lucide-react';
 
 interface GamepadMappingModalProps {
@@ -8,7 +8,7 @@ interface GamepadMappingModalProps {
 }
 
 export const GamepadMappingModal: React.FC<GamepadMappingModalProps> = ({ isOpen, onClose }) => {
-  const [gpState, setGpState] = useState(gamepadManager.getState());
+  const [gpState, setGpState] = useState(() => gamepadManager.getState());
   const [recordingKey, setRecordingKey] = useState<{ type: 'button' | 'axis', key: string } | null>(null);
   const [tempMapping, setTempMapping] = useState<GamepadMapping | null>(null);
 
@@ -58,10 +58,9 @@ export const GamepadMappingModal: React.FC<GamepadMappingModalProps> = ({ isOpen
   }, [recordingKey]);
 
   const updateMapping = (type: 'button' | 'axis', key: string, value: number) => {
-    // This is simplified - in reality we'd manage the whole mapping object
     console.log(`Mapping ${key} to ${type} index ${value}`);
-    // For now, let's just use the current mapping as base if tempMapping is null
-    const base = tempMapping || (gpState.customMappingEnabled ? (gamepadManager as any).customMapping : (gamepadManager as any).currentMapping);
+    const base = tempMapping || (gpState.customMappingEnabled ? gamepadManager.getCustomMapping() : gamepadManager.getDefaultMapping());
+    if (!base) return;
     const newMap = JSON.parse(JSON.stringify(base));
     if (type === 'button') newMap.buttons[key] = value;
     else newMap.axes[key] = value;
@@ -74,6 +73,11 @@ export const GamepadMappingModal: React.FC<GamepadMappingModalProps> = ({ isOpen
     }
     onClose();
   };
+
+  const buttons = gpState?.buttons || {};
+  const axes = gpState?.axes || {};
+  const connected = gpState?.connected || false;
+  const controllerName = gpState?.controllerName || 'Disconnected';
 
   return (
     <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/90 backdrop-blur-md p-4">
@@ -94,7 +98,7 @@ export const GamepadMappingModal: React.FC<GamepadMappingModalProps> = ({ isOpen
             <div className="space-y-4">
               <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider">Buttons</h3>
               <div className="space-y-2">
-                {Object.keys(gpState.buttons).map((btn) => (
+                {Object.keys(buttons).map((btn) => (
                   <button
                     key={btn}
                     onClick={() => startRecording('button', btn)}
@@ -114,7 +118,7 @@ export const GamepadMappingModal: React.FC<GamepadMappingModalProps> = ({ isOpen
             <div className="space-y-4">
               <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider">Axes</h3>
               <div className="space-y-2">
-                {Object.keys(gpState.axes).map((axis) => (
+                {Object.keys(axes).map((axis) => (
                   <button
                     key={axis}
                     onClick={() => startRecording('axis', axis)}
@@ -135,8 +139,8 @@ export const GamepadMappingModal: React.FC<GamepadMappingModalProps> = ({ isOpen
 
         <div className="px-6 py-4 border-t border-gray-800 bg-[#0a0a0a] flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className={`w-2 h-2 rounded-full ${gpState.connected ? 'bg-green-500' : 'bg-red-500'}`} />
-            <span className="text-xs text-gray-500">{gpState.controllerName}</span>
+            <div className={`w-2 h-2 rounded-full ${connected ? 'bg-green-500' : 'bg-red-500'}`} />
+            <span className="text-xs text-gray-500">{controllerName}</span>
           </div>
           <div className="flex gap-3">
             <button onClick={onClose} className="px-4 py-2 text-sm text-gray-400 hover:text-white transition-colors">Cancel</button>
@@ -149,3 +153,5 @@ export const GamepadMappingModal: React.FC<GamepadMappingModalProps> = ({ isOpen
     </div>
   );
 };
+
+export default GamepadMappingModal;
