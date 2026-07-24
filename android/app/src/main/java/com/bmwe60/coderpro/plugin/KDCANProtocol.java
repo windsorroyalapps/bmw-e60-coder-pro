@@ -5,6 +5,7 @@ import com.hoho.android.usbserial.driver.UsbSerialPort;
 import com.hoho.android.usbserial.util.SerialInputOutputManager;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -36,8 +37,6 @@ public class KDCANProtocol {
 
     private static final int CAN_DME_TX = 0x6F1;
     private static final int CAN_DME_RX = 0x612;
-    private static final int CAN_GWS_TX = 0x6F1;
-    private static final int CAN_GWS_RX = 0x613;
     private static final int CAN_EGS_TX = 0x6F1;
     private static final int CAN_EGS_RX = 0x614;
 
@@ -95,6 +94,7 @@ public class KDCANProtocol {
         retryCount = 0;
 
         try {
+            // 1. Try D-CAN (E60 2007+ with MSD80/81)
             Log.d(TAG, "Attempting D-CAN Handshake...");
             long t1 = System.currentTimeMillis();
             setupDCANMode();
@@ -113,6 +113,7 @@ public class KDCANProtocol {
                 }
             }
 
+            // 2. Try K-Line Fast Init (E60 < 2007 with ME9 / MSS70)
             Log.d(TAG, "D-CAN failed, attempting K-Line Fast Init...");
             retryCount++;
             long t2 = System.currentTimeMillis();
@@ -130,6 +131,7 @@ public class KDCANProtocol {
                 }
             }
 
+            // 3. Try K-Line 5-Baud Init (Legacy / Recovery)
             Log.d(TAG, "Fast Init failed, attempting 5-Baud Init...");
             retryCount++;
             long t3 = System.currentTimeMillis();
@@ -146,11 +148,64 @@ public class KDCANProtocol {
                 }
             }
 
-            errors.add("Vehicle not responding to D-CAN or K-Line");
+            errors.add("Vehicle not responding. Check:");
+            errors.add("- Vehicle ignition is ON (not just accessory)");
+            errors.add("- Cable is fully seated in OBD2 port");
+            errors.add("- For E60 2007+: D-CAN mode (500kbps)");
+            errors.add("- For E60 2003-2006: K-Line mode (10.4kbps)");
+            errors.add("- Try Generic USB Serial preset for non-BMW cables");
             return false;
         } catch (Exception e) {
             errors.add("Handshake error: " + e.getMessage());
             Log.e(TAG, "Handshake exception", e);
+            return false;
+        }
+    }
+
+    public boolean performELM327Init() {
+        errors.clear();
+        try {
+            Log.d(TAG, "Attempting ELM327 initialization...");
+            serialPort.setParameters(115200, 8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE);
+            serialPort.setDTR(false);
+            serialPort.setRTS(false);
+            Thread.sleep(100);
+
+            // Send ATZ (reset)
+            dataBuffer.clear();
+            serialPort.write("ATZ\r".getBytes(StandardCharsets.UTF_8), 100);
+            Thread.sleep(2000); // ELM327 takes ~2s to reset
+            byte[] resp1 = waitForResponse(1000);
+            if (resp1 != null) {
+                String s1 = new String(resp1, StandardCharsets.UTF_8);
+                Log.d(TAG, "ATZ response: " + s1.trim());
+                if (s1.contains("ELM") || s1.contains("OK")) {
+                    connected.set(true);
+                    Log.i(TAG, "ELM327 initialized successfully");
+                    return true;
+                }
+            }
+
+            // Try ATI (identify)
+            dataBuffer.clear();
+            serialPort.write("ATI\r".getBytes(StandardCharsets.UTF_8), 100);
+            byte[] resp2 = waitForResponse(1000);
+            if (resp2 != null) {
+                String s2 = new String(resp2, StandardCharsets.UTF_8);
+                Log.d(TAG, "ATI response: " + s2.trim());
+                if (s2.contains("ELM") || s2.contains("OK")) {
+                    connected.set(true);
+                    Log.i(TAG, "ELM327 identified successfully");
+                    return true;
+                }
+            }
+
+            errors.add("ELM327 not responding. Try:");
+            errors.add("- Generic USB Serial adapter preset");
+            errors.add("- Check adapter supports ELM327 protocol");
+            return false;
+        } catch (Exception e) {
+            errors.add("ELM327 init error: " + e.getMessage());
             return false;
         }
     }
@@ -438,9 +493,6 @@ public class KDCANProtocol {
 
         ECUInfo egs = scanSingleECU("EGS (Transmission)", "0x32", CAN_EGS_RX);
         if (egs != null) ecus.add(egs);
-
-        ECUInfo ekps = scanSingleECU("EKPS (Fuel Pump)", "0x73", 0x613);
-        if (ekps != null) ecus.add(ekps);
 
         ecuScanTime = System.currentTimeMillis() - t0;
         return ecus;

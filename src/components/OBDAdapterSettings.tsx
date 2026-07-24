@@ -2,16 +2,17 @@ import React, { useState, useCallback } from 'react';
 import {
   Cpu, Wifi, Bluetooth, Usb, ScanLine, ChevronRight,
   Settings2, AlertTriangle, CheckCircle, Loader,
-  X, Signal, Cable
+  X, Signal, Cable, Zap, Play
 } from 'lucide-react';
 import { OBD2Bridge } from '@/lib/nativeBridge';
+import { obd2Manager } from '@/lib/obd2Connection';
 import type { CableInfo } from '@/lib/nativeBridge';
 
 export interface AdapterConfig {
   id: string;
   name: string;
   type: 'usb' | 'bluetooth' | 'wifi';
-  protocol: 'k_dcan' | 'enet' | 'obd2';
+  protocol: 'k_dcan' | 'enet' | 'obd2' | 'auto';
   chip: string;
   baudRate: number;
   latencyTimer: number;
@@ -25,6 +26,13 @@ export interface AdapterConfig {
 }
 
 const ADAPTER_PRESETS: AdapterConfig[] = [
+  {
+    id: 'auto_detect', name: 'Auto-Detect (Recommended)', type: 'usb',
+    protocol: 'auto', chip: 'Any', baudRate: 115200,
+    latencyTimer: 1, dtrRtsMode: true, autoConnect: true,
+    requiresPairing: false, maxBaudRate: 500000, supportsCAN: true, supportsKLine: true,
+    description: 'Automatically detects and configures any supported USB OBD2 adapter.',
+  },
   {
     id: 'ftdi_kdcan', name: 'FTDI K+DCAN Cable', type: 'usb',
     protocol: 'k_dcan', chip: 'FTDI FT232R/H', baudRate: 115200,
@@ -54,11 +62,11 @@ const ADAPTER_PRESETS: AdapterConfig[] = [
     description: 'Prolific PL2303-based cable. Check for genuine chip (HX vs fake).',
   },
   {
-    id: 'enet_cable', name: 'BMW ENET Cable', type: 'usb',
-    protocol: 'enet', chip: 'AX88772A', baudRate: 100000000,
-    latencyTimer: 0, dtrRtsMode: false, autoConnect: true,
-    requiresPairing: false, maxBaudRate: 100000000, supportsCAN: true, supportsKLine: false,
-    description: 'Ethernet-based F/G-series coding cable. Fastest protocol for newer BMWs.',
+    id: 'generic_usb', name: 'Generic USB Serial Adapter', type: 'usb',
+    protocol: 'obd2', chip: 'Auto', baudRate: 115200,
+    latencyTimer: 16, dtrRtsMode: false, autoConnect: false,
+    requiresPairing: false, maxBaudRate: 115200, supportsCAN: true, supportsKLine: true,
+    description: 'Generic USB-to-serial adapter. Works with most ELM327 clones and basic serial cables.',
   },
   {
     id: 'elm327_bt', name: 'ELM327 Bluetooth', type: 'bluetooth',
@@ -93,11 +101,14 @@ export const OBDAdapterSettings: React.FC<OBDAdapterSettingsProps> = ({
   const [scanError, setScanError] = useState<string | null>(null);
   const [selectedPreset, setSelectedPreset] = useState<string | null>(selectedAdapterId);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [connecting, setConnecting] = useState(false);
+  const [connectError, setConnectError] = useState<string | null>(null);
 
   const handleScan = useCallback(async () => {
     setScanning(true);
     setScanResults([]);
     setScanError(null);
+    setConnectError(null);
 
     try {
       const result = await OBD2Bridge.detectCable();
@@ -114,16 +125,38 @@ export const OBDAdapterSettings: React.FC<OBDAdapterSettingsProps> = ({
         if (matchedPreset) {
           setSelectedPreset(matchedPreset.id);
           onSelectAdapter(matchedPreset.id);
+        } else {
+          setSelectedPreset('generic_usb');
+          onSelectAdapter('generic_usb');
         }
       } else {
-        setScanError(result.error || 'No adapters detected');
+        setScanError(result.error || 'No adapters detected. Make sure USB OTG is enabled and cable is plugged in.');
       }
     } catch (e: any) {
-      setScanError(e.message || 'Scan failed');
+      setScanError(e.message || 'Scan failed. Check USB OTG permissions.');
     } finally {
       setScanning(false);
     }
   }, [onSelectAdapter]);
+
+  const handleConnectDetected = useCallback(async (cable: CableInfo) => {
+    setConnecting(true);
+    setConnectError(null);
+    try {
+      const adapterType = cable.type.includes('ELM327') ? 'ELM327' : 'AUTO';
+      const success = await obd2Manager.connect(adapterType);
+      if (success) {
+        onClose();
+      } else {
+        const state = obd2Manager.getState();
+        setConnectError(state.lastError || 'Connection failed. Try a different adapter preset or check vehicle ignition.');
+      }
+    } catch (e: any) {
+      setConnectError(e.message || 'Connection error');
+    } finally {
+      setConnecting(false);
+    }
+  }, [onClose]);
 
   const handleSelect = (id: string) => {
     setSelectedPreset(id);
@@ -178,12 +211,20 @@ export const OBDAdapterSettings: React.FC<OBDAdapterSettingsProps> = ({
                         {cable.hasPermission ? 'Granted' : 'Needs Permission'}
                       </span>
                     </div>
-                    <div className="text-gray-500 grid grid-cols-2 gap-1">
+                    <div className="text-gray-500 grid grid-cols-2 gap-1 mb-2">
                       <span>Chip: {cable.detectedChip}</span>
                       <span>VID/PID: {cable.vendorId.toString(16).toUpperCase()}/{cable.productId.toString(16).toUpperCase()}</span>
                       <span>Driver: {cable.driverVersion}</span>
                       <span>S/N: {cable.serialNumber || 'N/A'}</span>
                     </div>
+                    <button
+                      onClick={() => handleConnectDetected(cable)}
+                      disabled={connecting}
+                      className="w-full flex items-center justify-center gap-1.5 bg-green-600 hover:bg-green-700 disabled:bg-gray-700 text-white py-1.5 rounded-lg text-xs transition-colors"
+                    >
+                      {connecting ? <Loader className="w-3 h-3 animate-spin" /> : <Play className="w-3 h-3" />}
+                      {connecting ? 'Connecting...' : 'Connect to Vehicle'}
+                    </button>
                   </div>
                 ))}
               </div>
@@ -191,15 +232,28 @@ export const OBDAdapterSettings: React.FC<OBDAdapterSettingsProps> = ({
           )}
 
           {scanError && !scanning && (
-            <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-3 flex items-center gap-2 text-red-400 text-sm">
-              <AlertTriangle className="w-4 h-4" />
-              {scanError}
+            <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-3 flex items-start gap-2 text-red-400 text-sm">
+              <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+              <div>
+                <div className="font-medium">Scan Failed</div>
+                <div className="text-red-400/70">{scanError}</div>
+              </div>
+            </div>
+          )}
+
+          {connectError && (
+            <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-3 flex items-start gap-2 text-red-400 text-sm">
+              <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+              <div>
+                <div className="font-medium">Connection Failed</div>
+                <div className="text-red-400/70">{connectError}</div>
+              </div>
             </div>
           )}
 
           {scanResults.length === 0 && !scanning && !scanError && (
             <div className="text-center py-2 text-gray-500 text-sm">
-              No adapters auto-detected. Select manually below.
+              No adapters auto-detected. Select manually below or tap Scan.
             </div>
           )}
 
@@ -229,8 +283,8 @@ export const OBDAdapterSettings: React.FC<OBDAdapterSettingsProps> = ({
                       {preset.protocol === 'k_dcan' && (
                         <span className="text-[10px] bg-green-500/20 text-green-400 px-1.5 py-0.5 rounded">K+DCAN</span>
                       )}
-                      {preset.protocol === 'enet' && (
-                        <span className="text-[10px] bg-purple-500/20 text-purple-400 px-1.5 py-0.5 rounded">ENET</span>
+                      {preset.protocol === 'auto' && (
+                        <span className="text-[10px] bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded">AUTO</span>
                       )}
                     </div>
                     <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">{preset.description}</p>
