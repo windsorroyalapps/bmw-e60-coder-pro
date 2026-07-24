@@ -269,6 +269,27 @@ export class OBD2ConnectionManager {
     }
   }
 
+  // === Diagnostics ===
+  async readDTCs(): Promise<DTCReading[]> {
+    try {
+      const result = await OBD2Bridge.readDTCs();
+      return result.readings || [];
+    } catch (err) {
+      console.error('Failed to read DTCs', err);
+      return [];
+    }
+  }
+
+  async clearDTCs(ecuAddress?: string): Promise<boolean> {
+    try {
+      const result = await OBD2Bridge.clearDTCs({ ecuAddress });
+      return result.success;
+    } catch (err) {
+      console.error('Failed to clear DTCs', err);
+      return false;
+    }
+  }
+
   // === Watchdog ===
   enableWatchdog(timeoutMs: number = 500, onDead: () => void) {
     this.heartbeatTimeoutMs = timeoutMs;

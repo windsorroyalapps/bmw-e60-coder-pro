@@ -1,9 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import {
-  Cpu, Wifi, Bluetooth, Usb, ScanLine, ChevronRight,
-  Settings2, AlertTriangle, CheckCircle, Loader,
-  X, Signal, Cable, RefreshCw
-} from 'lucide-react';
+import { obd2Manager } from '@/lib/obd2Connection';
 
 export interface AdapterConfig {
   id: string;
@@ -95,19 +91,24 @@ export const OBDAdapterSettings: React.FC<OBDAdapterSettingsProps> = ({
     setScanning(true);
     setScanResults([]);
 
-    // Simulate USB device scan
-    await new Promise(r => setTimeout(r, 2000));
+    try {
+      const cable = await obd2Manager.detectCable();
+      if (cable) {
+        // Map native cable type to our preset IDs
+        let detectedId = '';
+        if (cable.detectedChip.includes('FTDI')) detectedId = 'ftdi_kdcan';
+        else if (cable.detectedChip.includes('CH340')) detectedId = 'ch340_kdcan';
+        else if (cable.type === 'enet') detectedId = 'enet_cable';
 
-    const detected: string[] = [];
-    // Check for FTDI
-    if (Math.random() > 0.3) detected.push('ftdi_kdcan');
-    // Check for CH340
-    if (Math.random() > 0.5) detected.push('ch340_kdcan');
-    // Check for ENET
-    if (Math.random() > 0.7) detected.push('enet_cable');
-
-    setScanResults(detected);
-    setScanning(false);
+        if (detectedId) {
+          setScanResults([detectedId]);
+        }
+      }
+    } catch (error) {
+      console.error('Scan failed:', error);
+    } finally {
+      setScanning(false);
+    }
   }, []);
 
   const handleSelect = (id: string) => {

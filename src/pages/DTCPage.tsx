@@ -1,13 +1,15 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useStore } from '@/hooks/useStore';
 import { getDTCInfo, searchDTCs } from '@/lib/dtcDatabase';
 import { getDtcDefinition } from '@/lib/geminiAiService';
+import { obd2Manager } from '@/lib/obd2Connection';
 import type { AiDtcDefinition } from '@/lib/geminiAiService';
 import type { DTCInfo } from '@/lib/dtcDatabase';
+import type { DTCReading } from '@/types/index';
 import {
   AlertTriangle, Search, X, ChevronRight,
   Activity, CircleDot, ShieldAlert, Info,
-  Wrench, AlertCircle, Loader2
+  Wrench, AlertCircle, Loader2, RefreshCw, Trash2
 } from 'lucide-react';
 
 const SEVERITY_COLORS = {
@@ -27,7 +29,61 @@ export const DTCPage: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedDTC, setSelectedDTC] = useState<DTCInfo | AiDtcDefinition | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [clearing, setClearing] = useState(false);
   const [activeFilter, setActiveFilter] = useState<'all' | 'info' | 'warning' | 'critical'>('all');
+  const [activeDTCs, setActiveDTCs] = useState<DTCInfo[]>([]);
+
+  const fetchDTCs = async () => {
+    if (obd2.connectionState !== 'connected') return;
+
+    setRefreshing(true);
+    try {
+      const readings: DTCReading[] = await obd2Manager.readDTCs();
+      const allCodes: DTCInfo[] = [];
+
+      readings.forEach(reading => {
+        reading.codes.forEach(c => {
+          const info = getDTCInfo(c.code) || {
+            code: c.code,
+            description: c.description || 'Unknown fault code',
+            system: reading.ecuName || 'Unknown ECU',
+            severity: 'warning' as const
+          };
+          allCodes.push(info);
+        });
+      });
+
+      setActiveDTCs(allCodes);
+    } catch (err) {
+      console.error('Failed to fetch live DTCs', err);
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  const handleClearCodes = async () => {
+    if (obd2.connectionState !== 'connected') return;
+    if (!confirm('Are you sure you want to clear all diagnostic trouble codes?')) return;
+
+    setClearing(true);
+    try {
+      const success = await obd2Manager.clearDTCs();
+      if (success) {
+        setActiveDTCs([]);
+      }
+    } catch (err) {
+      console.error('Failed to clear DTCs', err);
+    } finally {
+      setClearing(false);
+    }
+  };
+
+  useEffect(() => {
+    if (obd2.connectionState === 'connected') {
+      fetchDTCs();
+    }
+  }, [obd2.connectionState]);
 
   const handleDtcClick = async (dtc: DTCInfo) => {
     setSelectedDTC(dtc);
@@ -41,13 +97,6 @@ export const DTCPage: React.FC = () => {
       setAiLoading(false);
     }
   };
-
-  // Simulated active DTCs from ECU
-  const activeDTCs: DTCInfo[] = [
-    getDTCInfo('P0301') || { code: 'P0301', description: 'Cylinder 1 misfire', system: 'Ignition', severity: 'critical' },
-    getDTCInfo('P0171') || { code: 'P0171', description: 'System too lean', system: 'Fuel', severity: 'critical' },
-    getDTCInfo('P0030') || { code: 'P0030', description: 'O2 sensor heater', system: 'Fuel', severity: 'warning' },
-  ];
 
   const searchResults = searchQuery.length >= 2 ? searchDTCs(searchQuery) : [];
 
@@ -63,9 +112,27 @@ export const DTCPage: React.FC = () => {
           <AlertTriangle className="w-5 h-5 text-red-400" />
           <h1 className="text-lg font-bold text-white">DTC Reader</h1>
         </div>
-        <div className="flex items-center gap-1.5 text-xs">
-          <CircleDot className="w-3.5 h-3.5 text-green-400" />
-          <span className="text-green-400">{obd2.connectionState === 'connected' ? 'Live' : 'Offline'}</span>
+        <div className="flex items-center gap-4">
+          <button
+            onClick={fetchDTCs}
+            disabled={refreshing || obd2.connectionState !== 'connected'}
+            className="p-1.5 text-gray-400 hover:text-white disabled:opacity-50 transition-colors"
+          >
+            <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
+          </button>
+          <button
+            onClick={handleClearCodes}
+            disabled={clearing || obd2.connectionState !== 'connected' || activeDTCs.length === 0}
+            className="p-1.5 text-gray-400 hover:text-red-400 disabled:opacity-50 transition-colors"
+          >
+            <Trash2 className={`w-4 h-4 ${clearing ? 'animate-pulse' : ''}`} />
+          </button>
+          <div className="flex items-center gap-1.5 text-xs">
+            <CircleDot className={`w-3.5 h-3.5 ${obd2.connectionState === 'connected' ? 'text-green-400' : 'text-gray-500'}`} />
+            <span className={obd2.connectionState === 'connected' ? 'text-green-400' : 'text-gray-500'}>
+              {obd2.connectionState === 'connected' ? 'Live' : 'Offline'}
+            </span>
+          </div>
         </div>
       </div>
 
@@ -76,20 +143,26 @@ export const DTCPage: React.FC = () => {
           Active Codes ({activeDTCs.length})
         </h2>
         <div className="space-y-2">
-          {activeDTCs.map(dtc => (
-            <button
-              key={dtc.code}
-              onClick={() => handleDtcClick(dtc)}
-              className={`w-full flex items-center gap-3 p-2.5 rounded-lg border text-left transition-colors ${SEVERITY_COLORS[dtc.severity]}`}
-            >
-              <ShieldAlert className="w-4 h-4 flex-shrink-0" />
-              <div className="flex-1 min-w-0">
-                <div className="text-sm font-mono font-medium">{dtc.code}</div>
-                <div className="text-xs text-gray-400 truncate">{dtc.description}</div>
-              </div>
-              <ChevronRight className="w-4 h-4 text-gray-600" />
-            </button>
-          ))}
+          {activeDTCs.length === 0 ? (
+            <div className="py-4 text-center border border-dashed border-gray-800 rounded-lg">
+              <p className="text-xs text-gray-600">No active codes found</p>
+            </div>
+          ) : (
+            activeDTCs.map(dtc => (
+              <button
+                key={`${dtc.code}-${dtc.system}`}
+                onClick={() => handleDtcClick(dtc)}
+                className={`w-full flex items-center gap-3 p-2.5 rounded-lg border text-left transition-colors ${SEVERITY_COLORS[dtc.severity]}`}
+              >
+                <ShieldAlert className="w-4 h-4 flex-shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-mono font-medium">{dtc.code}</div>
+                  <div className="text-xs text-gray-400 truncate">{dtc.description}</div>
+                </div>
+                <ChevronRight className="w-4 h-4 text-gray-600" />
+              </button>
+            ))
+          )}
         </div>
       </div>
 

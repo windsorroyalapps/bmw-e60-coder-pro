@@ -507,21 +507,18 @@ class LiveTuningEngine {
   }
 
   /**
-   * Simulated UDS WriteDataByIdentifier
-   * In the real implementation, this calls OBD2Bridge.udsWrite()
+   * Real UDS WriteDataByIdentifier via Native Bridge
    */
-  private async sendUDSWrite(_ecuAddress: string, _dataId: string, _value: number): Promise<void> {
-    return new Promise((resolve, reject) => {
-      // Simulate network delay
-      setTimeout(() => {
-        // 95% success rate simulation
-        if (Math.random() > 0.05) {
-          resolve();
-        } else {
-          reject(new Error('UDS NRC 0x78 - responsePending'));
-        }
-      }, 50);
+  private async sendUDSWrite(_ecuAddress: string, dataId: string, value: number): Promise<void> {
+    const { OBD2Bridge } = await import('./nativeBridge');
+    const result = await OBD2Bridge.writeDMEParameter({
+      parameter: dataId,
+      value
     });
+
+    if (!result.success) {
+      throw new Error(`ECU Write Failed for DID ${dataId}`);
+    }
   }
 
   /**

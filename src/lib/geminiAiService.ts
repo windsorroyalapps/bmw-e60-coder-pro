@@ -1,7 +1,8 @@
-// BMW E60 Coder Pro - Google Gemini AI Service
-// Set your API key in a .env file: VITE_GEMINI_API_KEY=your_key_here
-
+// BMW E60 Coder Pro - AI Service (Gemini)
 import type { PerformanceMap, AiTuneRecommendation } from '@/types';
+
+const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
+const MODEL_NAME = 'models/gemini-2.0-flash';
 
 function getApiKey(): string {
   const env = (import.meta as any).env;
@@ -10,12 +11,7 @@ function getApiKey(): string {
   return '';
 }
 
-const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
-const MODEL_NAME = 'models/gemini-2.0-flash';
-
-// Loose profile interface - only includes fields actually used by this service
-// This avoids type mismatch with the store's TuningProfile which has fewer fields
-interface ProfileLike {
+export interface ProfileLike {
   engine: string;
   currentMap: string;
   hasUpgradedIntercooler?: boolean;
@@ -65,6 +61,8 @@ export interface ChatMessage {
 export async function testConnection(): Promise<boolean> {
   try {
     const key = getApiKey();
+    if (!key) return false;
+
     const resp = await fetch(`${GEMINI_API_BASE}/${MODEL_NAME}?key=${key}`);
     return resp.status === 200;
   } catch {
@@ -79,10 +77,13 @@ export async function analyzeLiveData(
   modifications: string[]
 ): Promise<AiAnalysisResult> {
   const key = getApiKey();
-  if (!key) return localFallbackAnalysis(liveData, engineType);
+
+  if (!key) {
+    console.warn('Gemini API key missing, using local fallback analysis');
+    return localFallbackAnalysis(liveData, engineType);
+  }
 
   const systemPrompt = `You are an expert BMW ECU tuning advisor. Analyze the provided live OBD2 data and give tuning recommendations. Respond ONLY with valid JSON in this exact format: {"summary":"brief analysis","safetyAssessment":"safe/moderate/risky","estimatedHpGain":number,"confidence":number,"recommendations":[{"parameter":"name","currentValue":number,"suggestedValue":number,"reason":"explanation","priority":"high|medium|low","expectedGain":number}],"risks":["risk1"]}`;
-
   const userPrompt = `Live OBD2 Data: RPM:${liveData.rpm || 0} Boost:${(liveData.boost || 0).toFixed(2)}bar AFR:${(liveData.afr || 0).toFixed(3)} IAT:${liveData.iat || 0}C Coolant:${liveData.coolantTemp || 0}C OilTemp:${liveData.oilTemp || 0}C Timing:${liveData.timing || 0} Knock:${liveData.knock || 0} Load:${liveData.load || 0}% Throttle:${liveData.throttle || 0}% FuelTrimST:${liveData.fuelTrimShort || 0}% FuelTrimLT:${liveData.fuelTrimLong || 0}% DutyCycle:${liveData.dutyCycle || 0}% Engine:${engineType} Map:${currentMap} Mods:${modifications.join(', ') || 'Stock'}`;
 
   try {
@@ -91,197 +92,94 @@ export async function analyzeLiveData(
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         contents: [{ role: 'user', parts: [{ text: systemPrompt + '\n\n' + userPrompt }] }],
-        generationConfig: { temperature: 0.2, maxOutputTokens: 2048, responseMimeType: 'application/json' },
+        generationConfig: { temperature: 0.2, responseMimeType: 'application/json' },
       }),
     });
-    if (!resp.ok) throw new Error(`Gemini API error: ${resp.status}`);
     const data = await resp.json();
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
-    try {
-      const result = JSON.parse(text) as AiAnalysisResult;
-      return {
-        summary: result.summary || 'Analysis complete',
-        safetyAssessment: result.safetyAssessment || 'Safe',
-        estimatedHpGain: result.estimatedHpGain || 0,
-        confidence: result.confidence || 80,
-        recommendations: result.recommendations || [],
-        risks: result.risks || [],
-      };
-    } catch {
-      return { summary: 'AI analysis completed.', safetyAssessment: 'Safe', estimatedHpGain: 0, confidence: 70, recommendations: extractRecommendationsFromText(text, liveData), risks: [] };
-    }
+    return JSON.parse(text) as AiAnalysisResult;
   } catch (err) {
-    console.warn('Gemini AI failed, using fallback:', err);
+    console.warn('Gemini failed:', err);
     return localFallbackAnalysis(liveData, engineType);
   }
 }
 
 export async function getDtcDefinition(code: string, engineType: string): Promise<AiDtcDefinition> {
   const key = getApiKey();
-  const systemPrompt = `You are a BMW Master Technician. Provide a detailed definition for the given BMW DTC (Diagnostic Trouble Code).
-  Respond ONLY with valid JSON in this exact format:
-  {"code":"CODE","description":"Clear English description","system":"Affected System","severity":"info|warning|critical","causes":["possible cause 1"],"symptoms":["symptom 1"],"recommendation":"What to do next"}`;
-
-  const userPrompt = `DTC Code: ${code}, Engine: ${engineType}`;
 
   if (!key) {
-    return {
-      code,
-      description: "AI Lookup unavailable. Check Internet connection or API key.",
-      system: "Unknown",
-      severity: "info",
-      causes: [],
-      symptoms: [],
-      recommendation: "Please check the code manually."
-    };
+    return { code, description: "Gemini API key missing", system: "Unknown", severity: "info", causes: [], symptoms: [], recommendation: "Please configure Gemini API key" };
   }
+
+  const systemPrompt = `You are a BMW Master Technician. Respond ONLY with JSON definition for DTC ${code} on engine ${engineType}: {"code":"${code}","description":"...","system":"...","severity":"warning","causes":[],"symptoms":[],"recommendation":"..."}`;
 
   try {
     const resp = await fetch(`${GEMINI_API_BASE}/${MODEL_NAME}:generateContent?key=${key}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ role: 'user', parts: [{ text: systemPrompt + '\n\n' + userPrompt }] }],
-        generationConfig: { temperature: 0.1, maxOutputTokens: 1024, responseMimeType: 'application/json' },
-      }),
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: systemPrompt }] }], generationConfig: { responseMimeType: 'application/json' } }),
     });
     const data = await resp.json();
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
-    return JSON.parse(text) as AiDtcDefinition;
-  } catch (err) {
-    console.error('Gemini DTC lookup failed:', err);
-    return {
-      code,
-      description: "Error retrieving definition.",
-      system: "Unknown",
-      severity: "warning",
-      causes: [],
-      symptoms: [],
-      recommendation: "Error occurred during AI lookup."
-    };
+    return JSON.parse(data.candidates[0].content.parts[0].text);
+  } catch {
+    return { code, description: "AI Error", system: "Unknown", severity: "warning", causes: [], symptoms: [], recommendation: "Try again later" };
   }
 }
 
 export async function chat(message: string, history: ChatMessage[], liveData: Record<string, number>, engineType: string): Promise<string> {
   const key = getApiKey();
-  if (!key) return 'AI unavailable. Set VITE_GEMINI_API_KEY in .env file.';
-  const systemPrompt = `You are BMW AI Tuner, an expert in BMW ECU tuning for N54/N55/S55/M54 engines. Be concise and technical. Prioritize engine safety. Engine: ${engineType}.`;
-  const contents = [
-    { role: 'user' as const, parts: [{ text: systemPrompt }] },
-    ...history.slice(-10).map(h => ({ role: h.role as 'user' | 'model', parts: [{ text: h.text }] })),
-    { role: 'user' as const, parts: [{ text: `[Live: RPM=${liveData.rpm},Boost=${liveData.boost}bar,AFR=${liveData.afr},IAT=${liveData.iat}C] ${message}` }] },
-  ];
+
+  if (!key) {
+    return "Gemini API key is not configured. Please add it to your environment variables.";
+  }
+
+  const historyText = history.slice(-5).map(h => `${h.role}: ${h.text}`).join('\n');
+  const systemPrompt = `You are BMW AI Tuner. Engine: ${engineType}. Context: RPM=${liveData.rpm}, Boost=${liveData.boost}. History:\n${historyText}`;
+
   try {
     const resp = await fetch(`${GEMINI_API_BASE}/${MODEL_NAME}:generateContent?key=${key}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contents, generationConfig: { temperature: 0.3, maxOutputTokens: 1024 } }),
+      body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: systemPrompt + "\nUser: " + message }] }] }),
     });
-    if (!resp.ok) throw new Error(`API error: ${resp.status}`);
     const data = await resp.json();
-    return data.candidates?.[0]?.content?.parts?.[0]?.text || 'Could not process.';
+    return data.candidates[0].content.parts[0].text;
   } catch (err) {
-    return `AI unavailable: ${err instanceof Error ? err.message : String(err)}`;
+    return "AI Error connection to Gemini.";
   }
-}
-
-// ===== Compatibility wrapper for aiTuningEngine.ts =====
-
-function convertLiveData(data: any): Record<string, number> {
-  return {
-    rpm: data.rpm || 0, boost: data.boost || 0, afr: data.afr || 0, iat: data.iat || 0,
-    coolantTemp: data.coolantTemp || 0, oilTemp: data.oilTemp || 0, timing: data.timing || 0,
-    knock: data.knock || 0, load: data.load || 0, throttle: data.throttle || 0,
-    fuelTrimShort: data.fuelTrimShort || 0, fuelTrimLong: data.fuelTrimLong || 0,
-    dutyCycle: data.dutyCycle || 0, oilPressure: data.oilPressure || 0,
-    batteryVoltage: data.battery || 0, turbineInlet: data.turbineInlet || 0,
-    turbineOutlet: data.turbineOutlet || 0, lambda: data.lambda || 0,
-    tqActual: data.tqActual || 0, tqRequested: data.tqRequested || 0,
-    speed: data.speed || 0, fuelPressure: data.fuelPressure || 0, maf: data.maf || 0,
-  };
-}
-
-function buildModifications(profile: ProfileLike): string[] {
-  const mods: string[] = [];
-  if (profile.hasUpgradedIntercooler) mods.push('Upgraded Intercooler');
-  if (profile.hasUpgradedTurbo) mods.push('Upgraded Turbo(s)');
-  if (profile.hasUpgradedFuelPump) mods.push('Upgraded Fuel Pump');
-  if (profile.hasUpgradedClutch) mods.push('Upgraded Clutch');
-  if (profile.hasMethInjection) mods.push('Methanol Injection');
-  if (profile.hasDownpipes) mods.push('Downpipes');
-  if (profile.hasExhaust) mods.push('Exhaust');
-  if (profile.hasUpgradedChargepipe) mods.push('Upgraded Chargepipe');
-  return mods;
-}
-
-function inferRecommendationType(parameter: string): AiTuneRecommendation['type'] {
-  const p = parameter.toLowerCase();
-  if (p.includes('timing') || p.includes('knock')) return 'timing';
-  if (p.includes('fuel') || p.includes('afr') || p.includes('lambda')) return 'fuel';
-  if (p.includes('boost') || p.includes('wastegate')) return 'boost';
-  if (p.includes('throttle')) return 'throttle';
-  if (p.includes('vanos')) return 'vanos';
-  if (p.includes('safety') || p.includes('torque') || p.includes('oil') || p.includes('iat')) return 'safety';
-  return 'general';
-}
-
-export const geminiAiService = {
-  async analyzeLiveData(data: any, profile: ProfileLike, _currentMap: PerformanceMap | null): Promise<{ recommendations: AiTuneRecommendation[] }> {
-    const liveData = convertLiveData(data);
-    const result = await analyzeLiveData(liveData, profile.engine, profile.currentMap, buildModifications(profile));
-    const recommendations: AiTuneRecommendation[] = result.recommendations.map(r => ({
-      id: `ai_${r.parameter}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-      type: inferRecommendationType(r.parameter),
-      severity: r.priority === 'high' ? 'critical' : r.priority === 'medium' ? 'warning' : 'suggestion',
-      message: `${r.parameter}: ${r.reason}`,
-      parameter: r.parameter,
-      currentValue: r.currentValue,
-      recommendedValue: r.suggestedValue,
-      reason: r.reason,
-      confidence: Math.round(result.confidence),
-      autoApplicable: r.priority !== 'high',
-    }));
-    return { recommendations };
-  },
-
-  analyzeLiveDataLocal(data: any, profile: ProfileLike, _currentMap: PerformanceMap | null): { recommendations: AiTuneRecommendation[] } {
-    const liveData = convertLiveData(data);
-    const result = localFallbackAnalysis(liveData, profile.engine);
-    const recommendations: AiTuneRecommendation[] = result.recommendations.map(r => ({
-      id: `local_${r.parameter}_${Date.now()}`,
-      type: inferRecommendationType(r.parameter),
-      severity: r.priority === 'high' ? 'critical' : r.priority === 'medium' ? 'warning' : 'suggestion',
-      message: `${r.parameter}: ${r.reason}`,
-      parameter: r.parameter,
-      currentValue: r.currentValue,
-      recommendedValue: r.suggestedValue,
-      reason: r.reason,
-      confidence: Math.round(result.confidence),
-      autoApplicable: r.priority !== 'high',
-    }));
-    return { recommendations };
-  },
-};
-
-function extractRecommendationsFromText(text: string, liveData: Record<string, number>): AiRecommendation[] {
-  const recs: AiRecommendation[] = [];
-  if (text.toLowerCase().includes('boost') && liveData.boost !== undefined) {
-    recs.push({ parameter: 'Boost Target', currentValue: liveData.boost, suggestedValue: Math.min(liveData.boost + 0.1, 2.0), reason: 'AI suggests optimizing boost', priority: 'medium', expectedGain: 10 });
-  }
-  if (text.toLowerCase().includes('timing') && liveData.timing !== undefined) {
-    recs.push({ parameter: 'Ignition Timing', currentValue: liveData.timing, suggestedValue: liveData.timing + 1, reason: 'AI suggests timing optimization', priority: 'medium', expectedGain: 5 });
-  }
-  return recs;
 }
 
 function localFallbackAnalysis(liveData: Record<string, number>, _engineType: string): AiAnalysisResult {
   const recommendations: AiRecommendation[] = [];
   const risks: string[] = [];
   if (liveData.afr < 0.8) { risks.push('AFR very rich'); recommendations.push({ parameter: 'Fuel Correction', currentValue: liveData.afr, suggestedValue: 0.85, reason: 'AFR too rich', priority: 'high', expectedGain: 0 }); }
-  else if (liveData.afr > 1.1) { risks.push('AFR lean - knock risk'); recommendations.push({ parameter: 'Fuel Correction', currentValue: liveData.afr, suggestedValue: 1.0, reason: 'AFR too lean', priority: 'high', expectedGain: 0 }); }
-  if (liveData.knock > 2) { risks.push('Knock detected'); recommendations.push({ parameter: 'Global Timing', currentValue: liveData.timing, suggestedValue: liveData.timing - 2, reason: 'Knock detected, pulling timing', priority: 'high', expectedGain: -5 }); }
-  if (liveData.iat > 55) { risks.push('High IAT'); recommendations.push({ parameter: 'Boost Target', currentValue: liveData.boost, suggestedValue: Math.max(liveData.boost - 0.1, 0.5), reason: 'High IAT, reducing boost', priority: 'medium', expectedGain: -5 }); }
-  const estimatedGain = (recommendations.length === 0 && liveData.rpm > 3000) ? 15 : 0;
-  return { summary: recommendations.length > 0 ? `${recommendations.length} adjustments recommended` : 'All parameters optimal', safetyAssessment: risks.length > 0 ? 'Attention Required' : 'Safe', estimatedHpGain: estimatedGain, confidence: 75, recommendations, risks };
+  if (liveData.knock > 2) { risks.push('Knock detected'); recommendations.push({ parameter: 'Global Timing', currentValue: liveData.timing, suggestedValue: liveData.timing - 2, reason: 'Knock detected', priority: 'high', expectedGain: -5 }); }
+  return { summary: 'Safety analysis complete (Local Fallback)', safetyAssessment: risks.length > 0 ? 'Warning' : 'Safe', estimatedHpGain: 0, confidence: 75, recommendations, risks };
 }
 
-export default { testConnection, analyzeLiveData, chat };
+function inferRecommendationType(parameter: string): AiTuneRecommendation['type'] {
+  const p = parameter.toLowerCase();
+  if (p.includes('timing')) return 'timing';
+  if (p.includes('fuel') || p.includes('afr')) return 'fuel';
+  if (p.includes('boost')) return 'boost';
+  return 'general';
+}
+
+export const geminiAiService = {
+  async analyzeLiveData(data: any, profile: ProfileLike, _currentMap: PerformanceMap | null): Promise<{ recommendations: AiTuneRecommendation[] }> {
+    const liveData = { rpm: data.rpm || 0, boost: data.boost || 0, afr: data.afr || 0, timing: data.timing || 0, knock: data.knock || 0 };
+    const result = await analyzeLiveData(liveData, profile.engine, profile.currentMap, []);
+    return { recommendations: result.recommendations.map((r, i) => ({
+      id: `ai_${i}_${Date.now()}`,
+      type: inferRecommendationType(r.parameter),
+      severity: r.priority === 'high' ? 'critical' : 'suggestion',
+      message: `${r.parameter}: ${r.reason}`,
+      parameter: r.parameter,
+      currentValue: r.currentValue,
+      recommendedValue: r.suggestedValue,
+      reason: r.reason,
+      confidence: result.confidence,
+      autoApplicable: r.priority !== 'high',
+    })) };
+  }
+};
+
+export default { testConnection, analyzeLiveData, chat, getDtcDefinition, geminiAiService };

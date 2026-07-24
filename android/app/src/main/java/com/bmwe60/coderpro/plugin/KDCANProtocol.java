@@ -269,19 +269,18 @@ public class KDCANProtocol {
     }
 
     public double readBatteryVoltage() {
-        // In real UDS, SID 0x22 DID 0xD106 (Battery Voltage)
         try {
             byte[] request = {0x03, SID_READ_DATA_BY_ID, (byte) 0xD1, 0x06, 0, 0, 0, 0};
             sendCANFrame("0x6F1", request);
             byte[] resp = waitForResponse(200);
             if (resp != null && resp.length >= 6 && resp[1] == (SID_READ_DATA_BY_ID + 0x40)) {
                 int voltageRaw = ((resp[4] & 0xFF) << 8) | (resp[5] & 0xFF);
-                return voltageRaw * 0.001; // Scale factor for BMW voltage
+                return voltageRaw * 0.001;
             }
         } catch (Exception e) {
             Log.e(TAG, "Voltage read failed", e);
         }
-        return connected.get() ? 13.6 + (Math.random() * 0.4) : 0.0;
+        return 0.0;
     }
 
     public List<String> readECUDTCs(String address) {
@@ -321,13 +320,28 @@ public class KDCANProtocol {
     public Map<String, Double> readAllLiveData() {
         Map<String, Double> data = new HashMap<>();
         if (!connected.get()) return data;
-        
-        data.put("rpm", 700.0 + (Math.random() * 100));
-        data.put("coolant_temp", 92.0 + (Math.random() * 5));
-        data.put("oil_temp", 100.0 + (Math.random() * 2));
-        data.put("voltage", readBatteryVoltage());
-        data.put("boost_target", 0.6 + (Math.random() * 0.1));
-        data.put("boost_actual", 0.58 + (Math.random() * 0.1));
+
+        try {
+            // RPM - DID 0xF40C
+            byte[] rpmReq = {0x03, SID_READ_DATA_BY_ID, (byte) 0xF4, 0x0C, 0, 0, 0, 0};
+            sendCANFrame("0x6F1", rpmReq);
+            byte[] rpmResp = waitForResponse(100);
+            if (rpmResp != null && rpmResp.length >= 6) {
+                data.put("rpm", (double) (((rpmResp[4] & 0xFF) << 8) | (rpmResp[5] & 0xFF)));
+            }
+
+            // Coolant - DID 0xD101
+            byte[] coolantReq = {0x03, SID_READ_DATA_BY_ID, (byte) 0xD1, 0x01, 0, 0, 0, 0};
+            sendCANFrame("0x6F1", coolantReq);
+            byte[] coolantResp = waitForResponse(100);
+            if (coolantResp != null && coolantResp.length >= 5) {
+                data.put("coolant_temp", (double) (coolantResp[4] & 0xFF) - 40.0);
+            }
+
+            data.put("voltage", readBatteryVoltage());
+        } catch (Exception e) {
+            Log.e(TAG, "Live data read failed", e);
+        }
         return data;
     }
 

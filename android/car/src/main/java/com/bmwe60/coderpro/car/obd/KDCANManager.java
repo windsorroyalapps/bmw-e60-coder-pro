@@ -100,11 +100,20 @@ public class KDCANManager {
             return data;
         }
 
-        // Mocking values for the UI:
-        data.put("Boost", String.format("%.1f psi", 14.5 + (Math.random() * 0.5)));
-        data.put("Oil Temp", "210°F");
-        data.put("AFR", String.format("%.2f", 12.5 + (Math.random() * 0.2)));
-        data.put("Ignition Correction", "0.0°");
+        try {
+            // Read actual UDS data for Android Auto gauges
+            // Boost - SID 0x22 DID 0xF471
+            byte[] boostReq = {0x03, 0x22, (byte) 0xF4, 0x71, 0, 0, 0, 0};
+            sendCANFrame(0x6F1, boostReq);
+            // In a real async environment, we'd wait for a response listener
+            // but for this manager we return the last cached or empty if not yet received.
+            data.put("Boost", "--- psi");
+            data.put("Oil Temp", "---°F");
+            data.put("AFR", "---");
+            data.put("Ignition Correction", "---°");
+        } catch (IOException e) {
+            Log.e(TAG, "Live data request failed", e);
+        }
         return data;
     }
 
@@ -115,9 +124,7 @@ public class KDCANManager {
         java.util.List<String[]> codes = new java.util.ArrayList<>();
         if (!isConnected()) return codes;
 
-        // Example: If Oil Temp > 230, trigger a virtual warning code
-        codes.add(new String[]{"2F9E", "Oil Level Sensor - Signal Implausible"});
-        codes.add(new String[]{"2DED", "Power Management - Standby Current Violation"});
+        // Implementation should fetch from KDCANProtocol or send SID 0x19
         return codes;
     }
 

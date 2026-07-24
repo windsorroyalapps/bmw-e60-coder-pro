@@ -139,50 +139,38 @@ export const FlashModal: React.FC = () => {
     return checks.filter(c => c.critical).every(c => c.pass);
   };
 
-  const startFlashing = () => {
-    const flashSession: FlashSession = {
-      id: `flash_${Date.now()}`,
-      startTime: Date.now(),
-      status: 'flashing',
-      progress: 0,
-      currentSector: 'Calibration 0',
-      sectorsTotal: 10,
-      sectorsComplete: 0,
-      bytesWritten: 0,
-      bytesTotal: 2 * 1024 * 1024,
-      speed: 0,
-      eta: 300,
-      errors: [],
-      isLiveFlash: flashType === 'live',
-      vehicleSpeed: 0,
-      batteryVoltage: obd2.batteryVoltage,
-    };
-    setSession(flashSession);
+  const startFlashing = async () => {
+    const isLive = flashType === 'live';
+    const result = await obd2Manager.startFlash(isLive);
 
-    let progress = 0;
-    const interval = setInterval(() => {
-      progress += Math.random() * 5;
-      if (progress >= 100) {
-        progress = 100;
-        clearInterval(interval);
-        flashSession.status = 'complete';
-        flashSession.progress = 100;
-        flashSession.sectorsComplete = flashSession.sectorsTotal;
-        flashSession.bytesWritten = flashSession.bytesTotal;
-        flashSession.speed = 65536;
-        flashSession.eta = 0;
-        setSession({ ...flashSession });
-        setStep('complete');
-        addNotification({ message: 'Flash completed successfully', type: 'success' });
-      } else {
-        flashSession.progress = progress;
-        flashSession.bytesWritten = Math.floor(progress / 100 * flashSession.bytesTotal);
-        flashSession.speed = 32768 + Math.random() * 32768;
-        flashSession.eta = Math.floor((100 - progress) / (progress / ((Date.now() - flashSession.startTime) / 1000)));
-        flashSession.sectorsComplete = Math.floor(progress / 100 * flashSession.sectorsTotal);
-        setSession({ ...flashSession });
-      }
-    }, 200);
+    if (result.success && result.session) {
+      setSession(result.session);
+
+      // Listen for native progress updates
+      const removeListener = await obd2Manager.addBackupProgressListener((data) => {
+        setSession(prev => prev ? {
+          ...prev,
+          progress: data.progress,
+          currentSector: data.currentSector,
+          sectorsComplete: data.sectorsComplete,
+          sectorsTotal: data.sectorsTotal,
+          speed: data.speed,
+          eta: data.eta
+        } : null);
+
+        if (data.progress >= 100) {
+          setStep('complete');
+          addNotification({ message: 'Flash completed successfully', type: 'success' });
+          removeListener();
+        }
+      });
+
+      // Start the actual execution
+      obd2Manager.executeFlash();
+    } else {
+      setStep('error');
+      addNotification({ message: 'Failed to start flash session', type: 'error' });
+    }
   };
 
   const currentSector = obd2.ecus.find(e => e.address === '0x12');
