@@ -1,11 +1,6 @@
-// BMW E60 Coder Pro - OBD2/K+DCAN Connection Manager
-// 100% LIVE - All communication goes through the native Android USB bridge.
-// No simulation, no mock data, no Math.random(). Real ECU communication only.
-
 import { OBD2Bridge } from './nativeBridge';
 import type { FlashProgressEvent, CableInfo } from './nativeBridge';
 
-// Re-export CableInfo from nativeBridge for consumers
 export type { CableInfo };
 
 export type ConnectionState = 'disconnected' | 'searching' | 'connecting' | 'handshaking' | 'connected' | 'error';
@@ -78,12 +73,31 @@ export class OBD2ConnectionManager {
   private listeners: ((state: OBD2State) => void)[] = [];
   private flashListeners: ((session: FlashSession) => void)[] = [];
   private flashSession: FlashSession | null = null;
+  private usbEventUnsub: (() => void) | null = null;
 
-  // Connection watchdog
   private watchdogTimer: ReturnType<typeof setInterval> | null = null;
   private lastHeartbeat: number = 0;
-  private heartbeatTimeoutMs: number = 500;
+  private heartbeatTimeoutMs: number = 2000;
   private onConnectionDeadCallback: (() => void) | null = null;
+  private liveDataTimer: ReturnType<typeof setInterval> | null = null;
+
+  constructor() {
+    this.registerUsbListener();
+  }
+
+  private registerUsbListener() {
+    OBD2Bridge.addListener('usbDeviceEvent', (event) => {
+      if (event.event === 'attached') {
+        if (this.state.autoConnect && this.state.connectionState === 'disconnected') {
+          this.connect('AUTO');
+        }
+      } else if (event.event === 'detached') {
+        this.disconnect();
+      }
+    }).then(handle => {
+      this.usbEventUnsub = () => handle.remove();
+    });
+  }
 
   subscribe(callback: (state: OBD2State) => void) {
     this.listeners.push(callback);
@@ -94,7 +108,7 @@ export class OBD2ConnectionManager {
   }
 
   private emit() {
-    this.listeners.forEach(l => l(this.state));
+    this.listeners.forEach(l => l({ ...this.state }));
   }
 
   subscribeFlash(callback: (session: FlashSession) => void) {
@@ -107,7 +121,7 @@ export class OBD2ConnectionManager {
 
   private emitFlash() {
     if (this.flashSession) {
-      this.flashListeners.forEach(l => l(this.flashSession!));
+      this.flashListeners.forEach(l => l(this.flashSession));
     }
   }
 
@@ -115,29 +129,37 @@ export class OBD2ConnectionManager {
     return { ...this.state };
   }
 
-  // === Cable Detection ===
   async detectCable(): Promise<CableInfo | null> {
+    this.state.connectionState = 'searching';
+    this.emit();
     try {
       const result = await OBD2Bridge.detectCable();
-      if (result.found && result.cable) {
-        const cable = result.cable as CableInfo;
+      if (result.found && result.cables && result.cables.length > 0) {
+        const cable = result.cables[0];
         this.state.cable = cable;
         this.emit();
         return cable;
       }
+      this.state.connectionState = 'disconnected';
+      this.emit();
       return null;
-    } catch {
+    } catch (err: any) {
+      this.state.lastError = err?.message || 'Cable detection failed';
+      this.state.connectionState = 'error';
+      this.emit();
       return null;
     }
   }
 
-  // === Connection ===
-  async connect(): Promise<boolean> {
+  async connect(adapterType: 'AUTO' | 'KDCAN' | 'ELM327' = 'AUTO'): Promise<boolean> {
+    if (this.state.connectionState === 'connected') return true;
+
     this.state.connectionState = 'connecting';
+    this.state.lastError = null;
     this.emit();
 
     try {
-      const result = await OBD2Bridge.connect();
+      const result = await OBD2Bridge.connect({ adapterType });
       if (result.success) {
         this.state.connectionState = 'handshaking';
         this.emit();
@@ -145,17 +167,30 @@ export class OBD2ConnectionManager {
         if (result.ecus && result.ecus.length > 0) {
           this.state.ecus = result.ecus as unknown as ECUInfo[];
         }
-        if (result.batteryVoltage) {
+        if (result.batteryVoltage !== undefined) {
           this.state.batteryVoltage = result.batteryVoltage;
         }
         if (result.protocol) {
           this.state.protocol = result.protocol as ProtocolType;
+        }
+        if (result.ignitionState) {
+          this.state.ignitionState = result.ignitionState as OBD2State['ignitionState'];
+        }
+        if (result.engineRunning !== undefined) {
+          this.state.engineRunning = result.engineRunning;
+        }
+        if (result.dmeProtocolVersion) {
+          this.state.dmeProtocolVersion = result.dmeProtocolVersion;
+        }
+        if (result.diagnostics) {
+          this.state.diagnostics = result.diagnostics;
         }
 
         this.state.connectionState = 'connected';
         this.state.lastActivity = Date.now();
         this.emit();
         this.startWatchdog();
+        this.startLiveDataPolling();
         return true;
       } else {
         this.state.connectionState = 'error';
@@ -171,11 +206,11 @@ export class OBD2ConnectionManager {
     }
   }
 
-  disconnect() {
+  async disconnect() {
     try {
-      OBD2Bridge.disconnect();
+      await OBD2Bridge.disconnect();
     } catch {
-      // Ignore disconnect errors
+      // Ignore
     }
     this.state.connectionState = 'disconnected';
     this.state.cable = null;
@@ -184,25 +219,60 @@ export class OBD2ConnectionManager {
     this.state.diagnostics = null;
     this.state.lastError = null;
     this.state.dmeProtocolVersion = '';
+    this.state.engineRunning = false;
+    this.state.ignitionState = 'off';
     this.emit();
     this.stopWatchdog();
+    this.stopLiveDataPolling();
   }
 
-  // === Live Data ===
   async readLiveData(): Promise<Record<string, number> | null> {
     try {
       const data = await OBD2Bridge.readLiveData();
       if (data && data.connected !== false) {
         this.state.lastActivity = Date.now();
+        this.heartbeat();
+
         const numericData: Record<string, number> = {};
         for (const [key, value] of Object.entries(data)) {
           if (key !== 'connected' && key !== 'timestamp' && typeof value === 'number') {
             numericData[key] = value;
           }
         }
-        if (numericData.battery) this.state.batteryVoltage = numericData.battery;
-        if (numericData.rpm) this.state.rpm = numericData.rpm;
-        return numericData;
+
+        const mapped: Record<string, number> = {};
+        if (numericData.rpm !== undefined) mapped.rpm = numericData.rpm;
+        if (numericData.voltage !== undefined) mapped.battery = numericData.voltage;
+        if (numericData.coolant_temp !== undefined) mapped.coolantTemp = numericData.coolant_temp;
+        if (numericData.oil_temp !== undefined) mapped.oilTemp = numericData.oil_temp;
+        if (numericData.boost_actual !== undefined) mapped.boost = numericData.boost_actual;
+        if (numericData.boost_target !== undefined) mapped.boostTarget = numericData.boost_target;
+        if (numericData.iat !== undefined) mapped.iat = numericData.iat;
+        if (numericData.throttle_pos !== undefined) mapped.throttle = numericData.throttle_pos;
+        if (numericData.load !== undefined) mapped.load = numericData.load;
+        if (numericData.timing !== undefined) mapped.timing = numericData.timing;
+        if (numericData.fuel_pressure !== undefined) mapped.fuelPressure = numericData.fuel_pressure;
+        if (numericData.knock !== undefined) mapped.knock = numericData.knock;
+        if (numericData.lambda !== undefined) mapped.lambda = numericData.lambda;
+        if (numericData.map_pressure !== undefined) mapped.mapPressure = numericData.map_pressure;
+        if (numericData.maf !== undefined) mapped.maf = numericData.maf;
+        if (numericData.fuel_trim_short !== undefined) mapped.fuelTrimShort = numericData.fuel_trim_short;
+        if (numericData.fuel_trim_long !== undefined) mapped.fuelTrimLong = numericData.fuel_trim_long;
+        if (numericData.duty_cycle !== undefined) mapped.dutyCycle = numericData.duty_cycle;
+        if (numericData.tq_actual !== undefined) mapped.tqActual = numericData.tq_actual;
+        if (numericData.tq_requested !== undefined) mapped.tqRequested = numericData.tq_requested;
+        if (numericData.turbine_inlet !== undefined) mapped.turbineInlet = numericData.turbine_inlet;
+        if (numericData.turbine_outlet !== undefined) mapped.turbineOutlet = numericData.turbine_outlet;
+        if (numericData.afr !== undefined) mapped.afr = numericData.afr;
+        if (numericData.speed !== undefined) mapped.speed = numericData.speed;
+        if (numericData.oil_pressure !== undefined) mapped.oilPressure = numericData.oil_pressure;
+
+        if (mapped.rpm !== undefined) this.state.rpm = mapped.rpm;
+        if (mapped.battery !== undefined) this.state.batteryVoltage = mapped.battery;
+        if (mapped.speed !== undefined) this.state.vehicleSpeed = mapped.speed;
+
+        this.emit();
+        return mapped;
       }
       return null;
     } catch {
@@ -210,7 +280,22 @@ export class OBD2ConnectionManager {
     }
   }
 
-  // === Flash / Backup ===
+  private startLiveDataPolling(intervalMs: number = 250) {
+    this.stopLiveDataPolling();
+    this.liveDataTimer = setInterval(() => {
+      if (this.state.connectionState === 'connected') {
+        this.readLiveData();
+      }
+    }, intervalMs);
+  }
+
+  private stopLiveDataPolling() {
+    if (this.liveDataTimer) {
+      clearInterval(this.liveDataTimer);
+      this.liveDataTimer = null;
+    }
+  }
+
   async addBackupProgressListener(callback: (event: FlashProgressEvent) => void): Promise<() => void> {
     const handle = await OBD2Bridge.addListener('backupProgress', callback as any);
     return () => handle.remove();
@@ -269,8 +354,23 @@ export class OBD2ConnectionManager {
     }
   }
 
-  // === Watchdog ===
-  enableWatchdog(timeoutMs: number = 500, onDead: () => void) {
+  async readDTCs(): Promise<{ readings: any[] }> {
+    try {
+      return await OBD2Bridge.readDTCs();
+    } catch {
+      return { readings: [] };
+    }
+  }
+
+  async clearDTCs(ecuAddress?: string): Promise<{ success: boolean; cleared: number }> {
+    try {
+      return await OBD2Bridge.clearDTCs({ ecuAddress });
+    } catch {
+      return { success: false, cleared: 0 };
+    }
+  }
+
+  enableWatchdog(timeoutMs: number = 2000, onDead: () => void) {
     this.heartbeatTimeoutMs = timeoutMs;
     this.onConnectionDeadCallback = onDead;
     this.startWatchdog();
@@ -290,8 +390,9 @@ export class OBD2ConnectionManager {
         if (this.onConnectionDeadCallback) {
           this.onConnectionDeadCallback();
         }
+        this.disconnect();
       }
-    }, 100);
+    }, 500);
   }
 
   private stopWatchdog() {
@@ -303,6 +404,14 @@ export class OBD2ConnectionManager {
 
   heartbeat() {
     this.lastHeartbeat = Date.now();
+  }
+
+  destroy() {
+    this.stopWatchdog();
+    this.stopLiveDataPolling();
+    if (this.usbEventUnsub) this.usbEventUnsub();
+    this.listeners = [];
+    this.flashListeners = [];
   }
 }
 

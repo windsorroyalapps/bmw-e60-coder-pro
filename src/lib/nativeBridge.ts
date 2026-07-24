@@ -1,21 +1,16 @@
-// BMW E60 Coder Pro - Native Bridge
-// TypeScript wrapper around the Capacitor OBD2Bridge native plugin.
-// All methods call into the Android native layer for real USB OBD2 communication.
-
 import { registerPlugin } from '@capacitor/core';
 import type { PluginListenerHandle } from '@capacitor/core';
 import type { DTCReading } from '@/types';
 
 export interface OBD2BridgePlugin {
-  // Cable detection
   detectCable(): Promise<{
     found: boolean;
-    cable?: CableInfo;
+    cables?: CableInfo[];
+    count?: number;
     error?: string;
   }>;
 
-  // Connection management
-  connect(): Promise<{
+  connect(options?: { adapterType?: 'AUTO' | 'KDCAN' | 'ELM327' }): Promise<{
     success: boolean;
     protocol?: string;
     ecus?: ECUInfo[];
@@ -29,15 +24,12 @@ export interface OBD2BridgePlugin {
   disconnect(): Promise<{ success: boolean }>;
   getConnectionState(): Promise<{ connected: boolean; usbOpen: boolean }>;
 
-  // Live data
   readLiveData(): Promise<LiveDataResponse>;
   readPID(options: { pid: string }): Promise<{ pid: string; value: number; timestamp: number }>;
 
-  // DME operations
   readDMEInfo(): Promise<{ ecuType: string; software: string; vin: string; powerClass: string; success: boolean }>;
   writeDMEParameter(options: { parameter: string; value: number }): Promise<{ success: boolean; parameter: string; value: number }>;
 
-  // Flashing
   startFlash(options: { isLiveFlash: boolean }): Promise<{
     success: boolean;
     message: string;
@@ -47,10 +39,8 @@ export interface OBD2BridgePlugin {
   quickFlash(): Promise<{ success: boolean; message: string }>;
   abortFlash(): Promise<{ success: boolean }>;
 
-  // CAN bus
   sendCANCommands(options: { commands: CANCommand[] }): Promise<{ success: boolean; sent: number }>;
 
-  // Flash Backup / Restore
   backupDME(): Promise<{
     success: boolean;
     backup?: BackupInfo;
@@ -63,26 +53,26 @@ export interface OBD2BridgePlugin {
     error?: string;
   }>;
 
-  // Diagnostic Trouble Codes
   readDTCs(): Promise<{ readings: DTCReading[] }>;
   clearDTCs(options: { ecuAddress?: string }): Promise<{ success: boolean; cleared: number }>;
 
-  // Event listeners
   addListener(eventName: 'flashProgress', listenerFunc: (data: FlashProgressEvent) => void): Promise<PluginListenerHandle>;
   addListener(eventName: 'flashComplete', listenerFunc: (data: { status: string }) => void): Promise<PluginListenerHandle>;
   addListener(eventName: 'flashError', listenerFunc: (data: { status: string; error: string }) => void): Promise<PluginListenerHandle>;
   addListener(eventName: 'backupProgress', listenerFunc: (data: { progress: number; currentSector: string }) => void): Promise<PluginListenerHandle>;
+  addListener(eventName: 'usbDeviceEvent', listenerFunc: (data: { event: 'attached' | 'detached'; deviceName: string }) => void): Promise<PluginListenerHandle>;
 }
 
 export interface CableInfo {
   type: string;
-  vendorId: string;
-  productId: string;
+  vendorId: number;
+  productId: number;
   serialNumber: string;
   driverVersion: string;
   baudRate: number;
   isGenuine: boolean;
   detectedChip: string;
+  hasPermission: boolean;
 }
 
 export interface ECUInfo {
@@ -163,33 +153,27 @@ export interface BackupSectorInfo {
   backedUp: boolean;
 }
 
-// Re-export DTCReading from @/types for consumers
 export type { DTCReading };
 
-// Register the native plugin
 export const OBD2Bridge = registerPlugin<OBD2BridgePlugin>('OBD2Bridge', {
-  web: () => {
-    // Web fallback - returns empty/no-op implementations
-    // The web build will show "Connect cable" prompts since there's no real OBD2
-    return {
-      detectCable: async () => ({ found: false, error: 'Native OBD2 only available on Android' }),
-      connect: async () => ({ success: false, error: 'Native OBD2 only available on Android' }),
-      disconnect: async () => ({ success: true }),
-      getConnectionState: async () => ({ connected: false, usbOpen: false }),
-      readLiveData: async () => ({ connected: false }),
-      readPID: async () => ({ pid: '', value: 0, timestamp: 0 }),
-      readDMEInfo: async () => ({ ecuType: '', software: '', vin: '', powerClass: '', success: false }),
-      writeDMEParameter: async () => ({ success: false, parameter: '', value: 0 }),
-      startFlash: async () => ({ success: false, message: 'Native OBD2 only available on Android' }),
-      executeFlash: async () => ({ started: false }),
-      quickFlash: async () => ({ success: false, message: 'Native OBD2 only available on Android' }),
-      abortFlash: async () => ({ success: true }),
-      sendCANCommands: async () => ({ success: false, sent: 0 }),
-      backupDME: async () => ({ success: false, error: 'Native backup not available on web' }),
-      restoreDME: async () => ({ success: false, sectorsRestored: 0, sectorsTotal: 0, error: 'Native restore not available on web' }),
-      readDTCs: async () => ({ readings: [] }),
-      clearDTCs: async () => ({ success: false, cleared: 0 }),
-      addListener: async () => ({ remove: () => {} } as PluginListenerHandle),
-    } as OBD2BridgePlugin;
-  },
+  web: () => ({
+    detectCable: async () => ({ found: false, error: 'Native OBD2 only available on Android' }),
+    connect: async () => ({ success: false, error: 'Native OBD2 only available on Android' }),
+    disconnect: async () => ({ success: true }),
+    getConnectionState: async () => ({ connected: false, usbOpen: false }),
+    readLiveData: async () => ({ connected: false }),
+    readPID: async () => ({ pid: '', value: 0, timestamp: 0 }),
+    readDMEInfo: async () => ({ ecuType: '', software: '', vin: '', powerClass: '', success: false }),
+    writeDMEParameter: async () => ({ success: false, parameter: '', value: 0 }),
+    startFlash: async () => ({ success: false, message: 'Native OBD2 only available on Android' }),
+    executeFlash: async () => ({ started: false }),
+    quickFlash: async () => ({ success: false, message: 'Native OBD2 only available on Android' }),
+    abortFlash: async () => ({ success: true }),
+    sendCANCommands: async () => ({ success: false, sent: 0 }),
+    backupDME: async () => ({ success: false, error: 'Native backup not available on web' }),
+    restoreDME: async () => ({ success: false, sectorsRestored: 0, sectorsTotal: 0, error: 'Native restore not available on web' }),
+    readDTCs: async () => ({ readings: [] }),
+    clearDTCs: async () => ({ success: false, cleared: 0 }),
+    addListener: async () => ({ remove: () => {} } as PluginListenerHandle),
+  } as OBD2BridgePlugin),
 });

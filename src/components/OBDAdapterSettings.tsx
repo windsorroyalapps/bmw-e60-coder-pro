@@ -4,6 +4,8 @@ import {
   Settings2, AlertTriangle, CheckCircle, Loader,
   X, Signal, Cable, RefreshCw
 } from 'lucide-react';
+import { OBD2Bridge } from '@/lib/nativeBridge';
+import type { CableInfo } from '@/lib/nativeBridge';
 
 export interface AdapterConfig {
   id: string;
@@ -38,6 +40,20 @@ const ADAPTER_PRESETS: AdapterConfig[] = [
     description: 'Budget K+DCAN cable with CH340 chip. May need slower baud for stability.',
   },
   {
+    id: 'cp2102_kdcan', name: 'CP2102 K+DCAN Cable', type: 'usb',
+    protocol: 'k_dcan', chip: 'CP2102', baudRate: 115200,
+    latencyTimer: 8, dtrRtsMode: true, autoConnect: true,
+    requiresPairing: false, maxBaudRate: 500000, supportsCAN: true, supportsKLine: true,
+    description: 'CP2102-based K+DCAN cable. Good stability at 500k D-CAN.',
+  },
+  {
+    id: 'pl2303_kdcan', name: 'PL2303 K+DCAN Cable', type: 'usb',
+    protocol: 'k_dcan', chip: 'PL2303', baudRate: 115200,
+    latencyTimer: 16, dtrRtsMode: true, autoConnect: true,
+    requiresPairing: false, maxBaudRate: 115200, supportsCAN: true, supportsKLine: true,
+    description: 'Prolific PL2303-based cable. Check for genuine chip (HX vs fake).',
+  },
+  {
     id: 'enet_cable', name: 'BMW ENET Cable', type: 'usb',
     protocol: 'enet', chip: 'AX88772A', baudRate: 100000000,
     latencyTimer: 0, dtrRtsMode: false, autoConnect: true,
@@ -58,20 +74,6 @@ const ADAPTER_PRESETS: AdapterConfig[] = [
     requiresPairing: true, maxBaudRate: 500000, supportsCAN: true, supportsKLine: true,
     description: 'WiFi ELM327 adapter. iOS compatible but slower than USB.',
   },
-  {
-    id: 'vlink_bt', name: 'Veepeak OBDCheck BLE', type: 'bluetooth',
-    protocol: 'obd2', chip: 'STN1110/2120', baudRate: 115200,
-    latencyTimer: 0, dtrRtsMode: false, autoConnect: false,
-    requiresPairing: true, maxBaudRate: 2000000, supportsCAN: true, supportsKLine: false,
-    description: 'Advanced BLE adapter with STN chip. Faster than standard ELM327.',
-  },
-  {
-    id: 'oblink_mx', name: 'OBDLink MX+', type: 'bluetooth',
-    protocol: 'obd2', chip: 'STN2120', baudRate: 230400,
-    latencyTimer: 0, dtrRtsMode: false, autoConnect: false,
-    requiresPairing: true, maxBaudRate: 4000000, supportsCAN: true, supportsKLine: true,
-    description: 'Professional OBDLink MX+. Supports custom protocols and scripting.',
-  },
 ];
 
 interface OBDAdapterSettingsProps {
@@ -87,28 +89,41 @@ export const OBDAdapterSettings: React.FC<OBDAdapterSettingsProps> = ({
   isOpen, onClose, selectedAdapterId, onSelectAdapter, adapterConfigs, onUpdateConfig
 }) => {
   const [scanning, setScanning] = useState(false);
-  const [scanResults, setScanResults] = useState<string[]>([]);
+  const [scanResults, setScanResults] = useState<CableInfo[]>([]);
+  const [scanError, setScanError] = useState<string | null>(null);
   const [selectedPreset, setSelectedPreset] = useState<string | null>(selectedAdapterId);
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   const handleScan = useCallback(async () => {
     setScanning(true);
     setScanResults([]);
+    setScanError(null);
 
-    // Simulate USB device scan
-    await new Promise(r => setTimeout(r, 2000));
-
-    const detected: string[] = [];
-    // Check for FTDI
-    if (Math.random() > 0.3) detected.push('ftdi_kdcan');
-    // Check for CH340
-    if (Math.random() > 0.5) detected.push('ch340_kdcan');
-    // Check for ENET
-    if (Math.random() > 0.7) detected.push('enet_cable');
-
-    setScanResults(detected);
-    setScanning(false);
-  }, []);
+    try {
+      const result = await OBD2Bridge.detectCable();
+      if (result.found && result.cables && result.cables.length > 0) {
+        setScanResults(result.cables);
+        const first = result.cables[0];
+        const matchedPreset = ADAPTER_PRESETS.find(p => {
+          if (first.detectedChip.includes('Ftdi')) return p.id === 'ftdi_kdcan';
+          if (first.detectedChip.includes('Ch34')) return p.id === 'ch340_kdcan';
+          if (first.detectedChip.includes('Cp21')) return p.id === 'cp2102_kdcan';
+          if (first.detectedChip.includes('Prolific')) return p.id === 'pl2303_kdcan';
+          return false;
+        });
+        if (matchedPreset) {
+          setSelectedPreset(matchedPreset.id);
+          onSelectAdapter(matchedPreset.id);
+        }
+      } else {
+        setScanError(result.error || 'No adapters detected');
+      }
+    } catch (e: any) {
+      setScanError(e.message || 'Scan failed');
+    } finally {
+      setScanning(false);
+    }
+  }, [onSelectAdapter]);
 
   const handleSelect = (id: string) => {
     setSelectedPreset(id);
@@ -123,7 +138,6 @@ export const OBDAdapterSettings: React.FC<OBDAdapterSettingsProps> = ({
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
       <div className="bg-[#0d1117] rounded-2xl border border-gray-700 shadow-2xl w-full max-w-lg overflow-hidden max-h-[90vh] flex flex-col">
-        {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-800 flex-shrink-0">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-lg bg-blue-500/10 flex items-center justify-center">
@@ -140,7 +154,6 @@ export const OBDAdapterSettings: React.FC<OBDAdapterSettingsProps> = ({
         </div>
 
         <div className="p-5 space-y-4 overflow-y-auto flex-1">
-          {/* Scan Button */}
           <button
             onClick={handleScan}
             disabled={scanning}
@@ -150,41 +163,46 @@ export const OBDAdapterSettings: React.FC<OBDAdapterSettingsProps> = ({
             {scanning ? 'Scanning USB devices...' : 'Scan for Adapters'}
           </button>
 
-          {/* Scan Results */}
           {scanResults.length > 0 && (
             <div className="bg-green-500/10 border border-green-500/30 rounded-xl p-3">
               <div className="flex items-center gap-2 text-green-400 text-sm mb-2">
                 <CheckCircle className="w-4 h-4" />
                 Found {scanResults.length} adapter(s)
               </div>
-              <div className="space-y-1">
-                {scanResults.map(id => {
-                  const preset = ADAPTER_PRESETS.find(p => p.id === id);
-                  return (
-                    <button
-                      key={id}
-                      onClick={() => handleSelect(id)}
-                      className={`w-full flex items-center gap-2 p-2 rounded-lg transition-colors ${
-                        selectedPreset === id ? 'bg-blue-500/20 border border-blue-500/40' : 'bg-[#161b22] hover:bg-[#1c2129]'
-                      }`}
-                    >
-                      <Usb className="w-4 h-4 text-blue-400" />
-                      <span className="text-sm text-white">{preset?.name || id}</span>
-                      {selectedPreset === id && <CheckCircle className="w-4 h-4 text-blue-400 ml-auto" />}
-                    </button>
-                  );
-                })}
+              <div className="space-y-2">
+                {scanResults.map((cable, idx) => (
+                  <div key={idx} className="bg-[#161b22] rounded-lg p-3 text-xs">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-white font-medium">{cable.type}</span>
+                      <span className={`px-1.5 py-0.5 rounded ${cable.hasPermission ? 'bg-green-500/20 text-green-400' : 'bg-yellow-500/20 text-yellow-400'}`}>
+                        {cable.hasPermission ? 'Granted' : 'Needs Permission'}
+                      </span>
+                    </div>
+                    <div className="text-gray-500 grid grid-cols-2 gap-1">
+                      <span>Chip: {cable.detectedChip}</span>
+                      <span>VID/PID: {cable.vendorId.toString(16).toUpperCase()}/{cable.productId.toString(16).toUpperCase()}</span>
+                      <span>Driver: {cable.driverVersion}</span>
+                      <span>S/N: {cable.serialNumber || 'N/A'}</span>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           )}
 
-          {scanResults.length === 0 && !scanning && (
+          {scanError && !scanning && (
+            <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-3 flex items-center gap-2 text-red-400 text-sm">
+              <AlertTriangle className="w-4 h-4" />
+              {scanError}
+            </div>
+          )}
+
+          {scanResults.length === 0 && !scanning && !scanError && (
             <div className="text-center py-2 text-gray-500 text-sm">
               No adapters auto-detected. Select manually below.
             </div>
           )}
 
-          {/* Adapter List */}
           <div className="space-y-2">
             <h3 className="text-sm font-semibold text-gray-400">All Adapters</h3>
             {ADAPTER_PRESETS.map(preset => {
@@ -223,126 +241,71 @@ export const OBDAdapterSettings: React.FC<OBDAdapterSettingsProps> = ({
                       </span>
                       <span className="flex items-center gap-1">
                         <Signal className="w-3 h-3" />
-                        {(preset.baudRate / 1000).toFixed(0)}k
+                        {preset.maxBaudRate >= 1000000 ? (preset.maxBaudRate / 1000000).toFixed(0) + 'Mbps' : (preset.maxBaudRate / 1000).toFixed(0) + 'kbps'}
                       </span>
                     </div>
                   </div>
-                  <ChevronRight className={`w-4 h-4 flex-shrink-0 ${isSelected ? 'text-blue-400' : 'text-gray-600'}`} />
+                  {isSelected && <CheckCircle className="w-4 h-4 text-blue-400 flex-shrink-0" />}
                 </button>
               );
             })}
           </div>
 
-          {/* Advanced Settings */}
           {selectedPresetData && (
-            <div className="border border-gray-700 rounded-xl overflow-hidden">
+            <div className="border-t border-gray-800 pt-4">
               <button
                 onClick={() => setShowAdvanced(!showAdvanced)}
-                className="w-full flex items-center justify-between p-3 bg-[#161b22] hover:bg-[#1c2129] transition-colors"
+                className="flex items-center gap-2 text-sm text-gray-400 hover:text-white transition-colors"
               >
-                <div className="flex items-center gap-2">
-                  <Settings2 className="w-4 h-4 text-gray-400" />
-                  <span className="text-sm text-white">Advanced Settings</span>
-                </div>
-                <RefreshCw className={`w-4 h-4 text-gray-500 transition-transform ${showAdvanced ? 'rotate-180' : ''}`} />
+                <Settings2 className="w-4 h-4" />
+                Advanced Settings
+                <ChevronRight className={`w-4 h-4 transition-transform ${showAdvanced ? 'rotate-90' : ''}`} />
               </button>
 
               {showAdvanced && (
-                <div className="p-4 space-y-4 bg-[#0d1117]">
-                  {/* Baud Rate */}
-                  <div>
-                    <label className="text-xs text-gray-400 block mb-1">Baud Rate</label>
-                    <select
-                      value={currentConfig.baudRate || selectedPresetData.baudRate}
-                      onChange={e => onUpdateConfig(selectedPreset!, { baudRate: Number(e.target.value) })}
-                      className="w-full bg-[#161b22] border border-gray-700 rounded-lg px-3 py-2 text-sm text-white"
-                    >
-                      {[9600, 19200, 38400, 57600, 115200, 230400, 460800, 500000, 921600].map(b => (
-                        <option key={b} value={b}>{b.toLocaleString()}</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  {/* Latency Timer (FTDI only) */}
-                  {selectedPresetData.chip.includes('FTDI') && (
+                <div className="mt-3 space-y-3 bg-[#161b22] rounded-xl p-4 border border-gray-800">
+                  <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="text-xs text-gray-400 block mb-1">Latency Timer (ms)</label>
-                      <div className="flex items-center gap-3">
-                        <input
-                          type="range"
-                          min={1}
-                          max={255}
-                          value={currentConfig.latencyTimer || selectedPresetData.latencyTimer}
-                          onChange={e => onUpdateConfig(selectedPreset!, { latencyTimer: Number(e.target.value) })}
-                          className="flex-1 accent-blue-500"
-                        />
-                        <span className="text-sm text-white font-mono w-10 text-right">
-                          {currentConfig.latencyTimer || selectedPresetData.latencyTimer}
-                        </span>
-                      </div>
+                      <label className="text-xs text-gray-500 block mb-1">Baud Rate</label>
+                      <input
+                        type="number"
+                        value={currentConfig.baudRate || selectedPresetData.baudRate}
+                        onChange={(e) => onUpdateConfig(selectedPreset!, { baudRate: parseInt(e.target.value) })}
+                        className="w-full bg-[#0d1117] border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:border-blue-500 focus:outline-none"
+                      />
                     </div>
-                  )}
-
-                  {/* DTR/RTS Mode */}
-                  <div className="flex items-center justify-between">
                     <div>
-                      <div className="text-sm text-white">DTR/RTS Bus Switching</div>
-                      <div className="text-xs text-gray-500">Toggle between K-Line and D-CAN</div>
+                      <label className="text-xs text-gray-500 block mb-1">Latency Timer (ms)</label>
+                      <input
+                        type="number"
+                        value={currentConfig.latencyTimer || selectedPresetData.latencyTimer}
+                        onChange={(e) => onUpdateConfig(selectedPreset!, { latencyTimer: parseInt(e.target.value) })}
+                        className="w-full bg-[#0d1117] border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:border-blue-500 focus:outline-none"
+                      />
                     </div>
-                    <button
-                      onClick={() => onUpdateConfig(selectedPreset!, { dtrRtsMode: !(currentConfig.dtrRtsMode ?? selectedPresetData.dtrRtsMode) })}
-                      className={`w-12 h-6 rounded-full transition-colors ${
-                        (currentConfig.dtrRtsMode ?? selectedPresetData.dtrRtsMode) ? 'bg-blue-600' : 'bg-gray-700'
-                      }`}
-                    >
-                      <div className={`w-5 h-5 rounded-full bg-white transition-transform ${
-                        (currentConfig.dtrRtsMode ?? selectedPresetData.dtrRtsMode) ? 'translate-x-6' : 'translate-x-0.5'
-                      }`} />
-                    </button>
                   </div>
-
-                  {/* Auto Connect */}
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <div className="text-sm text-white">Auto-Connect</div>
-                      <div className="text-xs text-gray-500">Connect automatically on app start</div>
-                    </div>
-                    <button
-                      onClick={() => onUpdateConfig(selectedPreset!, { autoConnect: !(currentConfig.autoConnect ?? selectedPresetData.autoConnect) })}
-                      className={`w-12 h-6 rounded-full transition-colors ${
-                        (currentConfig.autoConnect ?? selectedPresetData.autoConnect) ? 'bg-blue-600' : 'bg-gray-700'
-                      }`}
-                    >
-                      <div className={`w-5 h-5 rounded-full bg-white transition-transform ${
-                        (currentConfig.autoConnect ?? selectedPresetData.autoConnect) ? 'translate-x-6' : 'translate-x-0.5'
-                      }`} />
-                    </button>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={currentConfig.autoConnect !== false}
+                      onChange={(e) => onUpdateConfig(selectedPreset!, { autoConnect: e.target.checked })}
+                      className="rounded border-gray-600 bg-[#0d1117] text-blue-500"
+                    />
+                    <span className="text-sm text-gray-400">Auto-connect on app launch</span>
                   </div>
-
-                  {selectedPresetData.type === 'bluetooth' && (
-                    <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-3 flex items-start gap-2">
-                      <AlertTriangle className="w-4 h-4 text-yellow-400 flex-shrink-0 mt-0.5" />
-                      <div className="text-xs text-yellow-300">
-                        Bluetooth adapters have limited functionality. Flashing is not supported.
-                        For full functionality, use a USB K+DCAN or ENET cable.
-                      </div>
-                    </div>
-                  )}
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={currentConfig.dtrRtsMode || selectedPresetData.dtrRtsMode}
+                      onChange={(e) => onUpdateConfig(selectedPreset!, { dtrRtsMode: e.target.checked })}
+                      className="rounded border-gray-600 bg-[#0d1117] text-blue-500"
+                    />
+                    <span className="text-sm text-gray-400">DTR/RTS mode switching (K+DCAN)</span>
+                  </div>
                 </div>
               )}
             </div>
           )}
-        </div>
-
-        {/* Footer */}
-        <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-gray-800 bg-[#0a0a0a] flex-shrink-0">
-          <button
-            onClick={onClose}
-            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm px-4 py-2 rounded-lg transition-colors"
-          >
-            <CheckCircle className="w-4 h-4" />
-            Done
-          </button>
         </div>
       </div>
     </div>
@@ -350,4 +313,3 @@ export const OBDAdapterSettings: React.FC<OBDAdapterSettingsProps> = ({
 };
 
 export default OBDAdapterSettings;
-export { ADAPTER_PRESETS };

@@ -56,7 +56,6 @@ export const GaugeDashboard: React.FC = () => {
 
   return (
     <div className="flex flex-col h-full">
-      {/* Top bar */}
       <div className="flex items-center justify-between px-4 py-2 bg-[#0d1117] border-b border-gray-800">
         <div className="flex items-center gap-3">
           <div className="relative">
@@ -71,7 +70,7 @@ export const GaugeDashboard: React.FC = () => {
             </select>
             <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 pointer-events-none" />
           </div>
-          
+
           {isLogging && (
             <div className="flex items-center gap-2 text-red-400 animate-pulse">
               <Activity className="w-4 h-4" />
@@ -103,7 +102,6 @@ export const GaugeDashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* Gauge Grid */}
       <div className="flex-1 overflow-auto p-4">
         <div className="grid grid-cols-12 gap-3 auto-rows-fr">
           {layout.gauges.map(gauge => (
@@ -129,7 +127,7 @@ export const GaugeDashboard: React.FC = () => {
                 peakValue={currentSession ? Math.max(
                   ...(currentSession.entries
                     .map(e => (e.data as any)?.[GAUGE_TYPE_MAP[gauge.type]?.key])
-                    .filter(v => v !== undefined) as number[]),
+                    .filter((v): v is number => v !== undefined && !isNaN(v))),
                   getGaugeValue(gauge.type)
                 ) : getGaugeValue(gauge.type)}
               />
@@ -138,7 +136,6 @@ export const GaugeDashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* Bottom status bar */}
       <div className="flex items-center justify-between px-4 py-2 bg-[#0d1117] border-t border-gray-800 text-xs text-gray-500">
         <div className="flex gap-4">
           <span>RPM: <span className="text-white font-mono">{liveData.rpm.toLocaleString()}</span></span>
@@ -146,8 +143,8 @@ export const GaugeDashboard: React.FC = () => {
           <span>Load: <span className="text-white font-mono">{liveData.load}%</span></span>
         </div>
         <div className="flex gap-4">
-          <span>IAT: <span className="font-mono">{Math.round(liveData.iat)}°C</span></span>
-          <span>AFR: <span className="font-mono">{liveData.afr.toFixed(2)} λ</span></span>
+          <span>IAT: <span className="font-mono">{Math.round(liveData.iat)}C</span></span>
+          <span>AFR: <span className="font-mono">{liveData.afr.toFixed(2)}</span></span>
         </div>
       </div>
     </div>

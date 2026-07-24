@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useStore } from '@/hooks/useStore';
 import { obd2Manager } from '@/lib/obd2Connection';
 import { ConnectionBar } from '@/components/ConnectionBar';
@@ -27,6 +27,7 @@ function App() {
     setShowQuickSwitch,
     obd2,
     updateLiveData,
+    setObd2,
     isLogging,
     currentSession,
     addLogEntry,
@@ -39,28 +40,49 @@ function App() {
     updateAdapterConfig,
   } = useStore();
 
+  const unsubRef = useRef<(() => void) | null>(null);
+  const liveUnsubRef = useRef<(() => void) | null>(null);
+
   useAndroidAutoProjection();
   useConnectionWatchdog();
 
-  // Live data polling
   useEffect(() => {
-    if (obd2.connectionState !== 'connected' || obd2ConnectionPaused) return;
+    unsubRef.current = obd2Manager.subscribe((managerState) => {
+      setObd2(managerState);
+    });
 
-    const interval = setInterval(async () => {
-      const data = await obd2Manager.readLiveData();
-      if (data) {
-        updateLiveData(data);
-        if (isLogging && currentSession) {
-          addLogEntry({
-            timestamp: Date.now(),
-            data,
-          });
-        }
+    liveUnsubRef.current = obd2Manager.subscribe((managerState) => {
+      if (managerState.connectionState === 'connected') {
+        obd2Manager.readLiveData().then((data) => {
+          if (data) {
+            updateLiveData(data);
+            if (isLogging && currentSession) {
+              addLogEntry({
+                timestamp: Date.now(),
+                data,
+              });
+            }
+          }
+        });
       }
-    }, 100);
+    });
 
-    return () => clearInterval(interval);
-  }, [obd2.connectionState, isLogging, currentSession, obd2ConnectionPaused]);
+    return () => {
+      unsubRef.current?.();
+      liveUnsubRef.current?.();
+    };
+  }, [setObd2, updateLiveData, isLogging, currentSession, addLogEntry]);
+
+  useEffect(() => {
+    if (obd2.connectionState === 'disconnected' && obd2.autoConnect) {
+      obd2Manager.detectCable().then((cable) => {
+        if (cable) {
+          const adapterType = cable.type.includes('ELM327') ? 'ELM327' : 'AUTO';
+          obd2Manager.connect(adapterType);
+        }
+      });
+    }
+  }, []);
 
   const navItems = [
     { id: 'home', label: 'Home', icon: Home },
@@ -89,15 +111,10 @@ function App() {
 
   return (
     <div className="h-screen flex flex-col bg-[#0a0a0a] overflow-hidden">
-      {/* Connection Bar */}
       <ConnectionBar />
-
-      {/* Main Content */}
       <div className="flex-1 overflow-hidden">
         {renderScreen()}
       </div>
-
-      {/* Bottom Navigation */}
       <nav className="h-16 bg-[#0d1117] border-t border-gray-800 flex items-center justify-around px-2 z-50">
         {navItems.map(item => {
           const Icon = item.icon;
@@ -124,8 +141,6 @@ function App() {
           );
         })}
       </nav>
-
-      {/* Modals */}
       <FlashModal />
       <QuickSwitch />
       <OBDAdapterSettings

@@ -51,7 +51,6 @@ public class OBD2BridgePlugin extends Plugin {
     }
 
     private void registerReceivers() {
-        // USB Permission receiver
         usbPermissionReceiver = new BroadcastReceiver() {
             @Override
             public void onReceive(Context context, Intent intent) {
@@ -79,7 +78,6 @@ public class OBD2BridgePlugin extends Plugin {
             getContext().registerReceiver(usbPermissionReceiver, permFilter);
         }
 
-        // USB Attach/Detach receiver
         usbAttachReceiver = new BroadcastReceiver() {
             @Override
             public void onReceive(Context context, Intent intent) {
@@ -137,8 +135,6 @@ public class OBD2BridgePlugin extends Plugin {
         try { usbManager.cleanup(); } catch (Exception e) {}
     }
 
-    // ==================== DETECTION ====================
-
     @PluginMethod
     public void detectCable(PluginCall call) {
         if (checkDestroyed(call)) return;
@@ -168,12 +164,10 @@ public class OBD2BridgePlugin extends Plugin {
         }
     }
 
-    // ==================== CONNECTION ====================
-
     @PluginMethod
     public void connect(PluginCall call) {
         if (checkDestroyed(call)) return;
-        String adapterType = call.getString("adapterType", "AUTO"); // AUTO, KDCAN, ELM327
+        String adapterType = call.getString("adapterType", "AUTO");
         connectInternal(call, adapterType);
     }
 
@@ -190,9 +184,8 @@ public class OBD2BridgePlugin extends Plugin {
 
             UsbSerialManager.CableInfo targetCable = cables.get(0);
             UsbDevice targetDevice = null;
-            UsbSerialProber prober = usbManager.getCustomProber();
-            for (UsbSerialDriver driver : prober.findAllDrivers(usbManager)) {
-                if (driver.getDevice().getVendorId() == targetCable.vendorId 
+            for (UsbSerialDriver driver : usbManager.getCustomProber().findAllDrivers(usbManager)) {
+                if (driver.getDevice().getVendorId() == targetCable.vendorId
                     && driver.getDevice().getProductId() == targetCable.productId) {
                     targetDevice = driver.getDevice();
                     break;
@@ -207,11 +200,9 @@ public class OBD2BridgePlugin extends Plugin {
             }
 
             if (!usbManager.hasPermission(targetDevice)) {
-                // Async permission flow
                 usbManager.requestPermission(targetDevice, new UsbSerialManager.PermissionCallback() {
                     @Override
                     public void onPermissionGranted(UsbDevice device) {
-                        // Retry connect on UI thread
                         bridge.executeOnMainThread(() -> {
                             PluginCall savedCall = bridge.getSavedCall(call.getCallbackId());
                             if (savedCall != null) {
@@ -244,7 +235,6 @@ public class OBD2BridgePlugin extends Plugin {
                 return;
             }
 
-            // Auto-configure based on adapter type
             if ("KDCAN".equalsIgnoreCase(adapterType) || targetCable.type.contains("K+DCAN")) {
                 usbManager.setBMWKLineMode();
             } else if ("ELM327".equalsIgnoreCase(adapterType) || targetCable.detectedChip.contains("Ftdi") || targetCable.detectedChip.contains("CH340")) {
@@ -318,8 +308,6 @@ public class OBD2BridgePlugin extends Plugin {
         call.resolve(result);
     }
 
-    // ==================== LIVE DATA ====================
-
     @PluginMethod
     public void readLiveData(PluginCall call) {
         if (checkDestroyed(call)) return;
@@ -330,8 +318,8 @@ public class OBD2BridgePlugin extends Plugin {
                 call.resolve(result);
                 return;
             }
-            Map<String, Double> liveData = kdcanProtocol.readAllLiveData();
-            for (Map.Entry<String, Double> entry : liveData.entrySet()) {
+            java.util.Map<String, Double> liveData = kdcanProtocol.readAllLiveData();
+            for (java.util.Map.Entry<String, Double> entry : liveData.entrySet()) {
                 result.put(entry.getKey(), entry.getValue());
             }
             result.put("connected", true);
@@ -395,6 +383,4 @@ public class OBD2BridgePlugin extends Plugin {
             call.reject(e.getMessage());
         }
     }
-
-    // ... keep remaining flash/tuning methods unchanged
 }

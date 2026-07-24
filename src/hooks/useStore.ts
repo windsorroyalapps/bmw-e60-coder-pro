@@ -16,6 +16,8 @@ interface AppState {
   setObd2: (state: OBD2State) => void;
   obd2Cable: CableInfo | null;
   setObd2Cable: (cable: CableInfo | null) => void;
+  syncObd2State: () => void;
+  syncObd2Cable: () => Promise<void>;
 
   // Profile
   profile: TuningProfile;
@@ -164,6 +166,11 @@ export const useStore = create<AppState>((set, get) => ({
   setObd2: (state) => set({ obd2: state }),
   obd2Cable: null,
   setObd2Cable: (cable) => set({ obd2Cable: cable }),
+  syncObd2State: () => set({ obd2: obd2Manager.getState() }),
+  syncObd2Cable: async () => {
+    const cable = await obd2Manager.detectCable();
+    set({ obd2Cable: cable });
+  },
 
   // Profile
   profile: {

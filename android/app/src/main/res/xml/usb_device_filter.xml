@@ -16,5 +16,3 @@
     <!-- ELM327 common variants -->
     <usb-device vendor-id="0x0403" product-id="0xFA33" />
 </resources>
-
-

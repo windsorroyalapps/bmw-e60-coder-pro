@@ -76,7 +76,7 @@ public class UsbSerialManager {
         return "K+DCAN / OBD2 Adapter";
     }
 
-    private UsbSerialProber getCustomProber() {
+    public UsbSerialProber getCustomProber() {
         UsbSerialProber.CustomProber customProber = new UsbSerialProber.CustomProber();
         customProber.addDriver(FtdiSerialDriver.class);
         customProber.addDriver(ProlificSerialDriver.class);
@@ -113,7 +113,6 @@ public class UsbSerialManager {
             return;
         }
         pendingDevice = device;
-        // Store callback in plugin-level receiver since this class isn't an Activity
         OBD2BridgePlugin.setPendingPermissionCallback(device, callback);
         int flags = PendingIntent.FLAG_IMMUTABLE;
         PendingIntent usbPermissionIntent = PendingIntent.getBroadcast(context, 0, new Intent(ACTION_USB_PERMISSION), flags);
