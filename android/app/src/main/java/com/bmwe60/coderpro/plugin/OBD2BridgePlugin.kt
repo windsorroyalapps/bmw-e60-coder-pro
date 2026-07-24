@@ -129,4 +129,25 @@ class OBD2BridgePlugin : Plugin() {
             }
         }
     }
+
+    companion object {
+        interface PermissionCallback {
+            fun onPermissionResult(granted: Boolean)
+        }
+
+        private var pendingPermissionCallback: PermissionCallback? = null
+
+        @JvmStatic
+        fun setPendingPermissionCallback(device: Any, callback: PermissionCallback) {
+            pendingPermissionCallback = callback
+        }
+
+        @JvmStatic
+        fun getPendingPermissionCallback(): PermissionCallback? = pendingPermissionCallback
+
+        @JvmStatic
+        fun clearPendingPermissionCallback() {
+            pendingPermissionCallback = null
+        }
+    }
 }
