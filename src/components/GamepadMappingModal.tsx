@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { gamepadManager, GamepadMapping, DEFAULT_MAPPINGS } from '@/lib/gamepadManager';
+import { gamepadManager } from '@/lib/gamepadManager';
 import { X, Check } from 'lucide-react';
 
 interface GamepadMappingModalProps {

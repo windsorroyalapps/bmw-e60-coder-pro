@@ -196,8 +196,8 @@ export class OBD2ConnectionManager {
       } else {
         this.state.connectionState = 'error';
         this.state.lastError = result.error || 'Connection failed';
-        if (result.suggestion) {
-          this.state.lastError += ` | ${result.suggestion}`;
+        if ((result as any).suggestion) {
+          this.state.lastError += ` | ${(result as any).suggestion}`;
         }
         this.emit();
         return false;

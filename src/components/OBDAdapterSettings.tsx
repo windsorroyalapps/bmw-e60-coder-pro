@@ -2,7 +2,7 @@ import React, { useState, useCallback } from 'react';
 import {
   Cpu, Wifi, Bluetooth, Usb, ScanLine, ChevronRight,
   Settings2, AlertTriangle, CheckCircle, Loader,
-  X, Signal, Cable, Zap, Play
+  X, Signal, Cable, Play
 } from 'lucide-react';
 import { OBD2Bridge } from '@/lib/nativeBridge';
 import { obd2Manager } from '@/lib/obd2Connection';

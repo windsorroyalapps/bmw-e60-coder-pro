@@ -360,3 +360,58 @@ export interface AdapterConfig {
   testerPresentInterval: number; // ms
   description: string;
 }
+
+// Gamepad types
+export interface GamepadAxes {
+  leftStickX: number;
+  leftStickY: number;
+  rightStickX: number;
+  rightStickY: number;
+  leftTrigger: number;
+  rightTrigger: number;
+}
+
+export interface GamepadButtons {
+  a: boolean;
+  b: boolean;
+  x: boolean;
+  y: boolean;
+  lb: boolean;
+  rb: boolean;
+  lt: boolean;
+  rt: boolean;
+  back: boolean;
+  start: boolean;
+  dpadUp: boolean;
+  dpadDown: boolean;
+  dpadLeft: boolean;
+  dpadRight: boolean;
+  leftStickBtn: boolean;
+  rightStickBtn: boolean;
+  xbox: boolean;
+  touchpad: boolean;
+}
+
+export interface GamepadMapping {
+  buttons: Record<string, number>;
+  axes: Record<string, number>;
+}
+
+export interface GamepadState {
+  connected: boolean;
+  enabled: boolean;
+  controllerType: 'xbox' | 'playstation';
+  controllerName: string;
+  axes: GamepadAxes;
+  buttons: GamepadButtons;
+  deadzone: number;
+  steeringSensitivity: number;
+  throttleSensitivity: number;
+  brakeSensitivity: number;
+  driveMode: 'sport' | 'comfort' | 'eco' | 'track';
+  invertSteering: boolean;
+  safetyConfirmed: boolean;
+  isRemoteStarting: boolean;
+  lastUpdate: number;
+  customMappingEnabled: boolean;
+}

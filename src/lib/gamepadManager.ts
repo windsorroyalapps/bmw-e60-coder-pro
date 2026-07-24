@@ -1,6 +1,6 @@
-import type { GamepadMapping, GamepadState } from '@/types';
+import type { GamepadMapping, GamepadState, GamepadAxes } from '@/types';
 
-export { GamepadMapping, GamepadState };
+export { GamepadMapping, GamepadState, GamepadAxes };
 
 const DEFAULT_MAPPINGS: Record<string, GamepadMapping> = {
   xbox: {
@@ -242,6 +242,13 @@ export class GamepadManager {
       }
     } catch {}
   }
+
+  startScanning() { this.enable(); }
+  stopScanning() { this.disable(); }
+  emergencyStop() { this.state.isRemoteStarting = false; this.emit(); }
+  setSteeringSensitivity(value: number) { this.setSensitivity('steering', value); }
+  setThrottleSensitivity(value: number) { this.setSensitivity('throttle', value); }
+  setBrakeSensitivity(value: number) { this.setSensitivity('brake', value); }
 }
 
 export const gamepadManager = GamepadManager.getInstance();
