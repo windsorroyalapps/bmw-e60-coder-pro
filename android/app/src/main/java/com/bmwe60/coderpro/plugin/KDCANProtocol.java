@@ -85,79 +85,70 @@ public class KDCANProtocol {
         usbIoManager.start();
     }
 
-    public boolean performHandshake() {
+    // ==================== HANDSHAKE METHODS ====================
+
+    public boolean performDCANHandshake() {
         errors.clear();
         long t0 = System.currentTimeMillis();
-        cableDetectTime = 0;
-        protocolNegotiateTime = 0;
-        ecuScanTime = 0;
-        retryCount = 0;
-
         try {
-            // 1. Try D-CAN (E60 2007+ with MSD80/81)
-            Log.d(TAG, "Attempting D-CAN Handshake...");
-            long t1 = System.currentTimeMillis();
-            setupDCANMode();
-            Thread.sleep(100);
-
+            Log.d(TAG, "D-CAN Handshake: Sending Tester Present to 0x" + Integer.toHexString(CAN_DME_TX));
+            
+            // Send Tester Present (0x3E 0x00) to DME
             if (sendUDSFrame(CAN_DME_TX, new byte[]{0x02, SID_TESTER_PRESENT, 0x00})) {
-                byte[] resp = readCANResponse(CAN_DME_RX, 1000);
+                byte[] resp = readCANResponse(CAN_DME_RX, 1500);
                 if (resp != null && resp.length >= 3) {
-                    if ((resp[2] & 0xFF) == 0x7E) {
+                    int sid = resp[2] & 0xFF;
+                    if (sid == 0x7E) { // Positive response to Tester Present
                         connected.set(true);
-                        protocolNegotiateTime = System.currentTimeMillis() - t1;
+                        protocolNegotiateTime = System.currentTimeMillis() - t0;
                         totalConnectTime = System.currentTimeMillis() - t0;
                         Log.i(TAG, "D-CAN handshake successful");
                         return true;
                     }
                 }
             }
+            errors.add("D-CAN: No response from DME. Vehicle may be K-Line only or ignition off.");
+            return false;
+        } catch (Exception e) {
+            errors.add("D-CAN handshake error: " + e.getMessage());
+            return false;
+        }
+    }
 
-            // 2. Try K-Line Fast Init (E60 < 2007 with ME9 / MSS70)
-            Log.d(TAG, "D-CAN failed, attempting K-Line Fast Init...");
-            retryCount++;
-            long t2 = System.currentTimeMillis();
-            setupKLineMode();
-            Thread.sleep(100);
-
+    public boolean performKLineHandshake() {
+        errors.clear();
+        long t0 = System.currentTimeMillis();
+        try {
+            Log.d(TAG, "K-Line Handshake: Attempting Fast Init...");
+            
             if (performKLineFastInit()) {
                 byte[] startComm = buildKWP2000Frame(ADDR_DME, new byte[]{SID_START_DIAGNOSTIC_SESSION});
-                if (sendAndVerifyKWP(startComm, 1000)) {
+                if (sendAndVerifyKWP(startComm, 1500)) {
                     connected.set(true);
-                    protocolNegotiateTime = System.currentTimeMillis() - t2;
+                    protocolNegotiateTime = System.currentTimeMillis() - t0;
                     totalConnectTime = System.currentTimeMillis() - t0;
                     Log.i(TAG, "K-Line Fast Init handshake successful");
                     return true;
                 }
             }
 
-            // 3. Try K-Line 5-Baud Init (Legacy / Recovery)
-            Log.d(TAG, "Fast Init failed, attempting 5-Baud Init...");
+            Log.d(TAG, "K-Line Fast Init failed, trying 5-Baud Init...");
             retryCount++;
-            long t3 = System.currentTimeMillis();
-            setupKLineMode();
-            Thread.sleep(100);
-
             if (performKLine5BaudInit()) {
-                if (sendAndVerifyKWP(buildKWP2000Frame(ADDR_DME, new byte[]{SID_START_DIAGNOSTIC_SESSION}), 1500)) {
+                if (sendAndVerifyKWP(buildKWP2000Frame(ADDR_DME, new byte[]{SID_START_DIAGNOSTIC_SESSION}), 2000)) {
                     connected.set(true);
-                    protocolNegotiateTime = System.currentTimeMillis() - t3;
+                    protocolNegotiateTime = System.currentTimeMillis() - t0;
                     totalConnectTime = System.currentTimeMillis() - t0;
                     Log.i(TAG, "K-Line 5-Baud Init handshake successful");
                     return true;
                 }
             }
 
-            errors.add("Vehicle not responding. Check:");
-            errors.add("- Vehicle ignition is ON (not just accessory)");
-            errors.add("- Cable is fully seated in OBD2 port");
-            errors.add("- For E60 2007+: D-CAN mode (500kbps)");
-            errors.add("- For E60 2003-2006: K-Line mode (10.4kbps)");
-            errors.add("- Try Generic USB Serial preset for non-BMW cables");
+            errors.add("K-Line: Vehicle not responding to Fast Init or 5-Baud Init.");
+            errors.add("Check: (1) Ignition ON, (2) K-Line cable (not D-CAN), (3) Pre-2007 E60 vehicle");
             return false;
         } catch (Exception e) {
-            errors.add("Handshake error: " + e.getMessage());
-            Log.e(TAG, "Handshake exception", e);
+            errors.add("K-Line handshake error: " + e.getMessage());
             return false;
         }
     }
@@ -165,21 +156,19 @@ public class KDCANProtocol {
     public boolean performELM327Init() {
         errors.clear();
         try {
-            Log.d(TAG, "Attempting ELM327 initialization...");
-            serialPort.setParameters(115200, 8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE);
-            serialPort.setDTR(false);
-            serialPort.setRTS(false);
-            Thread.sleep(100);
-
-            // Send ATZ (reset)
+            Log.d(TAG, "ELM327 Init: Sending ATZ...");
+            
+            // Clear buffer
             dataBuffer.clear();
-            serialPort.write("ATZ\r".getBytes(StandardCharsets.UTF_8), 100);
-            Thread.sleep(2000); // ELM327 takes ~2s to reset
-            byte[] resp1 = waitForResponse(1000);
+            
+            // Send ATZ (reset)
+            serialPort.write("ATZ\r".getBytes(StandardCharsets.UTF_8), 500);
+            Thread.sleep(2500); // ELM327 takes ~2s to reset
+            byte[] resp1 = waitForResponse(1500);
             if (resp1 != null) {
-                String s1 = new String(resp1, StandardCharsets.UTF_8);
-                Log.d(TAG, "ATZ response: " + s1.trim());
-                if (s1.contains("ELM") || s1.contains("OK")) {
+                String s1 = new String(resp1, StandardCharsets.UTF_8).trim();
+                Log.d(TAG, "ATZ response: " + s1);
+                if (s1.contains("ELM") || s1.contains("OK") || s1.contains(">")) {
                     connected.set(true);
                     Log.i(TAG, "ELM327 initialized successfully");
                     return true;
@@ -188,21 +177,36 @@ public class KDCANProtocol {
 
             // Try ATI (identify)
             dataBuffer.clear();
-            serialPort.write("ATI\r".getBytes(StandardCharsets.UTF_8), 100);
-            byte[] resp2 = waitForResponse(1000);
+            serialPort.write("ATI\r".getBytes(StandardCharsets.UTF_8), 500);
+            Thread.sleep(500);
+            byte[] resp2 = waitForResponse(1500);
             if (resp2 != null) {
-                String s2 = new String(resp2, StandardCharsets.UTF_8);
-                Log.d(TAG, "ATI response: " + s2.trim());
-                if (s2.contains("ELM") || s2.contains("OK")) {
+                String s2 = new String(resp2, StandardCharsets.UTF_8).trim();
+                Log.d(TAG, "ATI response: " + s2);
+                if (s2.contains("ELM") || s2.contains("OK") || s2.contains(">")) {
                     connected.set(true);
                     Log.i(TAG, "ELM327 identified successfully");
                     return true;
                 }
             }
 
-            errors.add("ELM327 not responding. Try:");
-            errors.add("- Generic USB Serial adapter preset");
-            errors.add("- Check adapter supports ELM327 protocol");
+            // Try ATE0 (echo off) as last resort
+            dataBuffer.clear();
+            serialPort.write("ATE0\r".getBytes(StandardCharsets.UTF_8), 500);
+            Thread.sleep(300);
+            byte[] resp3 = waitForResponse(1000);
+            if (resp3 != null) {
+                String s3 = new String(resp3, StandardCharsets.UTF_8).trim();
+                Log.d(TAG, "ATE0 response: " + s3);
+                if (s3.contains("OK") || s3.contains(">")) {
+                    connected.set(true);
+                    Log.i(TAG, "ELM327 responded to ATE0");
+                    return true;
+                }
+            }
+
+            errors.add("ELM327 not responding to ATZ/ATI/ATE0 commands.");
+            errors.add("This adapter may not be a true ELM327 clone. Try Generic USB Serial preset.");
             return false;
         } catch (Exception e) {
             errors.add("ELM327 init error: " + e.getMessage());
@@ -210,20 +214,36 @@ public class KDCANProtocol {
         }
     }
 
-    private void setupDCANMode() throws IOException {
-        serialPort.setParameters(500000, 8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE);
-        serialPort.setDTR(false);
-        serialPort.setRTS(true);
+    // Legacy method that tries all protocols
+    public boolean performHandshake() {
+        errors.clear();
+        long t0 = System.currentTimeMillis();
+        cableDetectTime = 0;
+        protocolNegotiateTime = 0;
+        ecuScanTime = 0;
+        retryCount = 0;
+
+        // Try D-CAN first
+        if (performDCANHandshake()) return true;
+        
+        // Try K-Line
+        retryCount++;
+        if (performKLineHandshake()) return true;
+        
+        // Try ELM327 as last resort
+        retryCount++;
+        if (performELM327Init()) return true;
+
+        errors.add("All protocols failed (D-CAN, K-Line, ELM327).");
+        errors.add("Check: (1) Vehicle ignition ON, (2) Cable fully seated, (3) Correct adapter preset selected");
+        return false;
     }
 
-    private void setupKLineMode() throws IOException {
-        serialPort.setParameters(10400, 8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE);
-        serialPort.setDTR(true);
-        serialPort.setRTS(false);
-    }
+    // ==================== K-LINE METHODS ====================
 
     private boolean performKLineFastInit() {
         try {
+            // Fast Init: 25ms LOW, 25ms HIGH on K-Line
             serialPort.setParameters(300, 8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE);
             serialPort.write(new byte[]{0x00}, 100);
             Thread.sleep(30);
@@ -234,7 +254,7 @@ public class KDCANProtocol {
             dataBuffer.clear();
             serialPort.write(startComm, 100);
 
-            byte[] resp = waitForResponse(1000);
+            byte[] resp = waitForResponse(1500);
             if (resp == null || resp.length < 2) return false;
             int lastByte = resp[resp.length - 2] & 0xFF;
             return lastByte == 0xC1 || lastByte == 0x81;
@@ -253,7 +273,7 @@ public class KDCANProtocol {
             serialPort.setParameters(10400, 8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE);
             Thread.sleep(100);
 
-            byte[] resp = waitForResponse(1500);
+            byte[] resp = waitForResponse(2000);
             if (resp == null || resp.length < 3) return false;
             if ((resp[0] & 0xFF) != 0x55) return false;
 
@@ -266,7 +286,7 @@ public class KDCANProtocol {
             }
 
             byte[] startSess = buildKWP2000Frame(ADDR_DME, new byte[]{0x01, SID_START_DIAGNOSTIC_SESSION});
-            return sendAndVerifyKWP(startSess, 1000);
+            return sendAndVerifyKWP(startSess, 1500);
         } catch (Exception e) {
             Log.e(TAG, "5-baud init error", e);
             return false;
@@ -317,6 +337,8 @@ public class KDCANProtocol {
         }
     }
 
+    // ==================== D-CAN / UDS METHODS ====================
+
     private boolean sendUDSFrame(int arbitrationId, byte[] data) {
         try {
             byte[] frame = buildCANSerialFrame(arbitrationId, data);
@@ -343,13 +365,15 @@ public class KDCANProtocol {
         if (raw == null || raw.length < 11) return null;
         int rxId = ((raw[0] & 0xFF) << 8) | (raw[1] & 0xFF);
         if (rxId != expectedId) {
-            Log.d(TAG, "Unexpected CAN ID: 0x" + Integer.toHexString(rxId));
+            Log.d(TAG, "Unexpected CAN ID: 0x" + Integer.toHexString(rxId) + " (expected 0x" + Integer.toHexString(expectedId) + ")");
         }
         int dlc = raw[2] & 0xFF;
         byte[] payload = new byte[dlc];
         System.arraycopy(raw, 3, payload, 0, dlc);
         return payload;
     }
+
+    // ==================== READ / WAIT ====================
 
     private byte[] waitForResponse(int timeoutMs) {
         List<Byte> result = new ArrayList<>();
@@ -374,6 +398,8 @@ public class KDCANProtocol {
         for (int i = 0; i < result.size(); i++) bytes[i] = result.get(i);
         return bytes;
     }
+
+    // ==================== LIVE DATA ====================
 
     public double readBatteryVoltage() {
         if (!connected.get()) return 0.0;
@@ -483,6 +509,8 @@ public class KDCANProtocol {
         return 0.0;
     }
 
+    // ==================== ECU SCANNING ====================
+
     public List<ECUInfo> scanECUs() {
         List<ECUInfo> ecus = new ArrayList<>();
         if (!connected.get()) return ecus;
@@ -537,6 +565,8 @@ public class KDCANProtocol {
         return sb.toString();
     }
 
+    // ==================== DME INFO ====================
+
     public DMEInfo readDMEInfo() {
         DMEInfo info = new DMEInfo();
         if (!connected.get()) return info;
@@ -589,6 +619,8 @@ public class KDCANProtocol {
         return sb.toString();
     }
 
+    // ==================== DTCs ====================
+
     public List<String> readDTCs() {
         List<String> dtcs = new ArrayList<>();
         if (!connected.get()) return dtcs;
@@ -638,6 +670,8 @@ public class KDCANProtocol {
         byte[] frame = buildCANSerialFrame(id, data);
         serialPort.write(frame, 100);
     }
+
+    // ==================== STATE / UTILS ====================
 
     public boolean isConnected() { return connected.get(); }
 

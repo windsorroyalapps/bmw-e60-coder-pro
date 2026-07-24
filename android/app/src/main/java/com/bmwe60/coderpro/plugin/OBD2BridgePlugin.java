@@ -7,6 +7,7 @@ import android.content.IntentFilter;
 import android.hardware.usb.UsbDevice;
 import android.hardware.usb.UsbManager;
 import android.os.Build;
+import android.util.Log;
 
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
@@ -149,6 +150,7 @@ public class OBD2BridgePlugin extends Plugin {
                 cableObj.put("isGenuine", cable.isGenuine);
                 cableObj.put("detectedChip", cable.detectedChip);
                 cableObj.put("hasPermission", cable.hasPermission);
+                cableObj.put("isGeneric", cable.isGeneric);
                 cableArray.put(cableObj);
             }
             result.put("cables", cableArray);
@@ -179,6 +181,8 @@ public class OBD2BridgePlugin extends Plugin {
             }
 
             UsbSerialManager.CableInfo targetCable = cables.get(0);
+            Log.i(TAG, "Detected adapter: " + targetCable.type + " (" + targetCable.detectedChip + ")");
+
             UsbDevice targetDevice = null;
             for (com.hoho.android.usbserial.driver.UsbSerialDriver driver : com.hoho.android.usbserial.driver.UsbSerialProber.getDefaultProber().findAllDrivers(usbManager.getUsbManager())) {
                 if (driver.getDevice().getVendorId() == targetCable.vendorId
@@ -231,47 +235,83 @@ public class OBD2BridgePlugin extends Plugin {
                 return;
             }
 
-            // Configure based on adapter type
+            // Wait for port to stabilize
+            Thread.sleep(200);
+
+            // Determine connection strategy based on adapter type
             boolean isELM327 = "ELM327".equalsIgnoreCase(adapterType);
-            boolean isGeneric = targetCable.type.contains("Generic") || targetCable.detectedChip.contains("CdcAcm");
-            
+            boolean isGeneric = targetCable.isGeneric || targetCable.type.contains("Generic");
+            boolean isKDCAN = targetCable.type.contains("K+DCAN") || targetCable.type.contains("BMW");
+
+            boolean handshake = false;
+            String triedProtocols = "";
+
             if (isELM327 || isGeneric) {
+                // Generic/ELM327: Try ELM327 AT commands
+                Log.i(TAG, "Trying ELM327 initialization...");
                 usbManager.setELM327Mode();
-            } else if ("KDCAN".equalsIgnoreCase(adapterType) || targetCable.type.contains("K+DCAN")) {
-                usbManager.setBMWKLineMode();
-            } else {
-                // AUTO mode: try BMW protocols first, then ELM327
-                usbManager.setBMWDCANMode();
-            }
-
-            kdcanProtocol.init(usbManager.getSerialPort());
-
-            boolean handshake;
-            if (isELM327 || isGeneric) {
+                Thread.sleep(100);
+                kdcanProtocol.init(usbManager.getSerialPort());
                 handshake = kdcanProtocol.performELM327Init();
+                triedProtocols = "ELM327";
+            } else if (isKDCAN) {
+                // BMW K+DCAN cable: Try K-Line first (more reliable on cheap cables), then D-CAN
+                Log.i(TAG, "Trying K-Line first (BMW K+DCAN)...");
+                usbManager.setBMWKLineMode();
+                Thread.sleep(100);
+                kdcanProtocol.init(usbManager.getSerialPort());
+                handshake = kdcanProtocol.performKLineHandshake();
+                triedProtocols = "K-Line";
+
+                if (!handshake) {
+                    Log.i(TAG, "K-Line failed, trying D-CAN...");
+                    usbManager.setBMWDCANMode();
+                    Thread.sleep(100);
+                    kdcanProtocol.init(usbManager.getSerialPort());
+                    handshake = kdcanProtocol.performDCANHandshake();
+                    triedProtocols += ", D-CAN";
+                }
             } else {
-                handshake = kdcanProtocol.performHandshake();
+                // AUTO mode: Try all protocols
+                Log.i(TAG, "AUTO mode: Trying D-CAN first...");
+                usbManager.setBMWDCANMode();
+                Thread.sleep(100);
+                kdcanProtocol.init(usbManager.getSerialPort());
+                handshake = kdcanProtocol.performDCANHandshake();
+                triedProtocols = "D-CAN";
+
+                if (!handshake) {
+                    Log.i(TAG, "D-CAN failed, trying K-Line...");
+                    usbManager.setBMWKLineMode();
+                    Thread.sleep(100);
+                    kdcanProtocol.init(usbManager.getSerialPort());
+                    handshake = kdcanProtocol.performKLineHandshake();
+                    triedProtocols += ", K-Line";
+                }
+
+                if (!handshake) {
+                    Log.i(TAG, "K-Line failed, trying ELM327...");
+                    usbManager.setELM327Mode();
+                    Thread.sleep(100);
+                    kdcanProtocol.init(usbManager.getSerialPort());
+                    handshake = kdcanProtocol.performELM327Init();
+                    triedProtocols += ", ELM327";
+                }
             }
 
             if (!handshake) {
-                // For AUTO mode, try ELM327 as fallback
-                if (!isELM327 && !isGeneric && "AUTO".equalsIgnoreCase(adapterType)) {
-                    usbManager.setELM327Mode();
-                    kdcanProtocol.init(usbManager.getSerialPort());
-                    handshake = kdcanProtocol.performELM327Init();
-                }
-                
-                if (!handshake) {
-                    usbManager.closePort();
-                    List<String> errors = kdcanProtocol.getErrors();
-                    String errorMsg = errors.isEmpty() ? "Vehicle not responding. Check ignition and cable." : errors.get(errors.size() - 1);
-                    result.put("success", false);
-                    result.put("error", errorMsg);
-                    result.put("details", new JSONArray(errors));
-                    result.put("suggestion", "Try Generic USB Serial preset if using a non-BMW cable.");
-                    call.resolve(result);
-                    return;
-                }
+                usbManager.closePort();
+                List<String> errors = kdcanProtocol.getErrors();
+                String errorMsg = errors.isEmpty() 
+                    ? "Vehicle not responding. Tried: " + triedProtocols 
+                    : errors.get(errors.size() - 1);
+                result.put("success", false);
+                result.put("error", errorMsg);
+                result.put("details", new JSONArray(errors));
+                result.put("triedProtocols", triedProtocols);
+                result.put("suggestion", "Check: (1) Vehicle ignition ON, (2) Cable fully seated, (3) Try Generic USB Serial preset for non-BMW cables");
+                call.resolve(result);
+                return;
             }
 
             List<KDCANProtocol.ECUInfo> ecus = kdcanProtocol.scanECUs();

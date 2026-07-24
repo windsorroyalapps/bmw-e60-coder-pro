@@ -46,6 +46,7 @@ public class UsbSerialManager {
         public boolean isGenuine = true;
         public String detectedChip;
         public boolean hasPermission;
+        public boolean isGeneric;
 
         public CableInfo(UsbDevice device, String driverName, boolean hasPermission) {
             this.type = inferAdapterType(device.getVendorId(), device.getProductId(), driverName);
@@ -54,19 +55,24 @@ public class UsbSerialManager {
             this.serialNumber = device.getSerialNumber();
             this.detectedChip = driverName;
             this.hasPermission = hasPermission;
+            this.isGeneric = this.type.contains("Generic") || this.type.contains("OBD2 Adapter");
         }
     }
 
     private static String inferAdapterType(int vid, int pid, String driverName) {
+        if (vid == 0x0403 && pid == 0xFA24) return "BMW K+DCAN (FTDI)";
+        if (vid == 0x0403 && pid == 0xFA33) return "BMW K+DCAN ELM";
         if (vid == 0x0403) return "FTDI OBD2 Adapter";
         if (vid == 0x1A86 && pid == 0x7523) return "CH340 OBD2 Adapter";
-        if (vid == 0x10C4) return "CP2102 OBD2 Adapter";
-        if (vid == 0x067B) return "PL2303 OBD2 Adapter";
+        if (vid == 0x1A86 && pid == 0x5523) return "CH340 OBD2 Adapter";
+        if (vid == 0x10C4 && pid == 0xEA60) return "CP2102 OBD2 Adapter";
+        if (vid == 0x067B && pid == 0x2303) return "PL2303 OBD2 Adapter";
         if (driverName.contains("Ftdi")) return "FTDI Cable";
         if (driverName.contains("Prolific")) return "PL2303 Cable";
         if (driverName.contains("Ch34")) return "CH340 Cable";
         if (driverName.contains("Cp21")) return "CP2102 Cable";
-        return "K+DCAN / OBD2 Adapter";
+        if (driverName.contains("CdcAcm")) return "Generic USB Serial";
+        return "Generic USB Serial / OBD2 Adapter";
     }
 
     public UsbManager getUsbManager() {
@@ -155,6 +161,7 @@ public class UsbSerialManager {
             serialPort.setDTR(true);
             serialPort.setRTS(false);
             currentProtocol = "K-LINE (10400)";
+            Log.i(TAG, "Switched to K-Line mode (10400 baud)");
         } catch (IOException e) {
             Log.e(TAG, "K-Line mode error: " + e.getMessage());
         }
@@ -167,6 +174,7 @@ public class UsbSerialManager {
             serialPort.setDTR(false);
             serialPort.setRTS(true);
             currentProtocol = "D-CAN (500k)";
+            Log.i(TAG, "Switched to D-CAN mode (500000 baud)");
         } catch (IOException e) {
             Log.e(TAG, "D-CAN mode error: " + e.getMessage());
         }
@@ -179,8 +187,28 @@ public class UsbSerialManager {
             serialPort.setDTR(false);
             serialPort.setRTS(false);
             currentProtocol = "ELM327 (115200)";
+            Log.i(TAG, "Switched to ELM327 mode (115200 baud)");
         } catch (IOException e) {
             Log.e(TAG, "ELM327 mode error: " + e.getMessage());
+        }
+    }
+
+    public void setBMWKDCANMode() {
+        if (serialPort == null) return;
+        try {
+            // K+DCAN cables often need 115200 for the FTDI bridge,
+            // then DTR/RTS toggling switches between K-Line and D-CAN
+            serialPort.setParameters(115200, 8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE);
+            serialPort.setDTR(true);
+            serialPort.setRTS(true);
+            Thread.sleep(50);
+            serialPort.setDTR(false);
+            serialPort.setRTS(false);
+            Thread.sleep(50);
+            currentProtocol = "K+DCAN (115200)";
+            Log.i(TAG, "Switched to K+DCAN mode (115200 baud)");
+        } catch (Exception e) {
+            Log.e(TAG, "K+DCAN mode error: " + e.getMessage());
         }
     }
 

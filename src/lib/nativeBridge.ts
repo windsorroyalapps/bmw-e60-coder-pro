@@ -20,6 +20,8 @@ export interface OBD2BridgePlugin {
     diagnostics?: ConnectionDiagnostics;
     dmeProtocolVersion?: string;
     error?: string;
+    triedProtocols?: string;
+    suggestion?: string;
   }>;
   disconnect(): Promise<{ success: boolean }>;
   getConnectionState(): Promise<{ connected: boolean; usbOpen: boolean }>;
@@ -73,6 +75,7 @@ export interface CableInfo {
   isGenuine: boolean;
   detectedChip: string;
   hasPermission: boolean;
+  isGeneric: boolean;
 }
 
 export interface ECUInfo {
