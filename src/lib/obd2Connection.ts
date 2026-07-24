@@ -120,8 +120,9 @@ export class OBD2ConnectionManager {
   }
 
   private emitFlash() {
-    if (this.flashSession) {
-      this.flashListeners.forEach(l => l(this.flashSession));
+    const session = this.flashSession;
+    if (session) {
+      this.flashListeners.forEach(l => l(session));
     }
   }
 

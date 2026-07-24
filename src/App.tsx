@@ -31,7 +31,7 @@ function App() {
     isLogging,
     currentSession,
     addLogEntry,
-    obd2ConnectionPaused,
+    
     showAdapterSettings,
     setShowAdapterSettings,
     selectedAdapterId,

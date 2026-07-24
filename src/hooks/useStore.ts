@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { TuningProfile, EngineType, LiveData, LogEntry, FlashBackup, LogSession, GaugeLayout } from '@/types';
 import type { OBD2State, CableInfo, FlashSession } from '@/lib/obd2Connection';
+import { obd2Manager } from '@/lib/obd2Connection';
 import { aiTuningEngine } from '@/lib/aiTuningEngine';
 import type { AdapterConfig } from '@/components/OBDAdapterSettings';
 import { testConnection as testGeminiConnection } from '@/lib/geminiAiService';
