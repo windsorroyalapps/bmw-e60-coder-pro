@@ -45,24 +45,6 @@ object BmwModuleMetadata {
             0xA0C1 to "key recognition / authentication",
             0xA116 to "ELV / steering lock plausibility",
         ),
-        BmwTargets.ACSM.name to mapOf(
-            0x01 to listOf(
-                "airbag_status_flags",
-                "occupancy_class_raw",
-                "deployment_status_raw",
-            ),
-        ),
-        BmwTargets.CCC.name to mapOf(
-            0x01 to listOf(
-                "ccc_status_flags",
-                "map_slot_active_raw",
-                "most_bus_status_raw",
-            ),
-            0x02 to listOf(
-                "active_map_slot",
-                "drive_mode_raw",
-            ),
-        ),
         BmwTargets.FRM.name to mapOf(
             0x9CBB to "FRM lamp output short circuit",
             0x9CBC to "FRM lamp output open circuit",

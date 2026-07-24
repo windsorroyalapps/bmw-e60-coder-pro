@@ -5,6 +5,7 @@ import com.bmwe60.coderpro.network.*
 import com.bmwe60.coderpro.protocol.*
 import com.bmwe60.coderpro.usb.*
 import com.getcapacitor.*
+import com.getcapacitor.annotation.CapacitorPlugin
 import kotlinx.coroutines.*
 import org.json.JSONArray
 import org.json.JSONObject
@@ -18,9 +19,9 @@ class OBD2BridgePlugin : Plugin() {
     @PluginMethod
     fun connect(call: PluginCall) {
         val transportType = call.getString("transport") ?: "USB_KDCAN"
-        val baudRate = call.getInt("baudRate", 115200)
-        val host = call.getString("host", "192.168.0.10")
-        val port = call.getInt("port", 35000)
+        val baudRate = call.getInt("baudRate") ?: 115200
+        val host = call.getString("host") ?: "192.168.0.10"
+        val port = call.getInt("port") ?: 35000
 
         scope.launch {
             try {
@@ -80,7 +81,7 @@ class OBD2BridgePlugin : Plugin() {
     @PluginMethod
     fun executeJob(call: PluginCall) {
         val jobId = call.getString("jobId") ?: return call.reject("jobId required")
-        val targetName = call.getString("target", "DME / DDE")
+        val targetName = call.getString("target") ?: "DME / DDE"
         val target = BmwTargets.defaults.find { it.name == targetName } ?: BmwTargets.DME
 
         scope.launch {

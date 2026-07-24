@@ -218,10 +218,10 @@ object BmwPayloadDecoders {
                 map["button_matrix_1"] = toBits(m1)
                 map["button_matrix_2"] = toBits(m2)
                 // F-series decoded button names (SZL_LENKRAD_TYP = F_SERIE required)
-                val frame = com.bmwe60coderpro.protocol.SzlButtonDecoder.decode(m1, m2)
+                val frame = SzlButtonDecoder.decode(m1, m2)
                 map["fseries_active_buttons"] = if (frame.activeButtons.isEmpty()) "none" else frame.activeButtons.joinToString(", ")
                 map["fseries_mfl_events_count"] = frame.mflEvents.size.toString()
-                map["fseries_mfl_events"] = if (frame.mflEvents.isEmpty()) "none" else frame.mflEvents.joinToString(", ") { it.label }
+                map["fseries_mfl_events"] = if (frame.mflEvents.isEmpty()) "none" else frame.mflEvents.joinToString(", ") { ev -> ev.label }
             }
             else -> decodeGenericBlock(body, map)
         }
