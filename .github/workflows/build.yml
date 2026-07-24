@@ -24,6 +24,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Inject Gemini API Key
+        run: |
+          echo "VITE_GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}" > .env
+          cat .env
+
       - name: Build web assets
         run: npm run build
 
