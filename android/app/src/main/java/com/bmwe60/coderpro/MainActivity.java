@@ -51,8 +51,8 @@ public class MainActivity extends BridgeActivity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
         registerPlugin(OBD2BridgePlugin.class);
+        super.onCreate(savedInstanceState);
 
         // Start Local Bank Settlement Server
         bankServer = new LocalBankServer();
