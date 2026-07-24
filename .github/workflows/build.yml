@@ -2,7 +2,7 @@ name: Build & Release
 
 on:
   push:
-    branches: [main]
+    branches: [main, feature/android-auto-real-ecu-integration]
     tags: ['v*']
   workflow_dispatch:
 
